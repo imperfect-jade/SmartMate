@@ -45,6 +45,10 @@ scan_includes("${ROOT_DIR}/src/model/domain" "Model domain"
     "qobject" "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
     "viewmodel" "view/")
 
+scan_includes("${ROOT_DIR}/src/model/planner" "Model planner"
+    "qobject" "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
+    "viewmodel" "view/")
+
 scan_includes("${ROOT_DIR}/src/model/services" "Model service"
     "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
     "viewmodel" "view/")
@@ -132,6 +136,10 @@ foreach(qml_file IN LISTS qml_files)
     if(qml_lower MATCHES "qsql[a-z0-9_]*")
         record_violation("${qml_file}"
             "View contains a Qt SQL type")
+    endif()
+    if(qml_lower MATCHES "\\.(filter|sort)[ \t\r\n]*\\(")
+        record_violation("${qml_file}"
+            "View contains JavaScript list filtering or sorting logic")
     endif()
 endforeach()
 

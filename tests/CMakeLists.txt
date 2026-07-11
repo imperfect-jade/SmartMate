@@ -16,6 +16,24 @@ target_link_libraries(tst_task_service
 
 add_test(NAME model.task_service COMMAND tst_task_service)
 
+qt_add_executable(tst_task_ordering
+    model/tst_TaskOrderingPolicy.cpp
+    fakes/FakeTaskRepository.h
+)
+
+target_include_directories(tst_task_ordering
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(tst_task_ordering
+    PRIVATE
+        smartmate_model
+        Qt6::Test
+)
+
+add_test(NAME model.task_ordering COMMAND tst_task_ordering)
+
 qt_add_executable(tst_sqlite_task_repository
     persistence/tst_SqliteTaskRepository.cpp
 )
@@ -75,13 +93,16 @@ target_compile_definitions(tst_qml_pickers
 
 target_link_libraries(tst_qml_pickers
     PRIVATE
+        smartmate_persistence
         smartmate_viewmodel
         smartmate_viewmodelplugin
         smartmate_ui
         smartmate_uiplugin
+        Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
         Qt6::QuickTest
+        Qt6::Sql
 )
 
 # QuickTest需要把静态QML模块的插件和资源导入测试进程，才能按URI创建选择器。
@@ -94,7 +115,7 @@ add_test(
 set_tests_properties(
     view.qml_pickers
     PROPERTIES
-        ENVIRONMENT "QT_QUICK_BACKEND=software"
+        ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic"
         TIMEOUT 15
 )
 
@@ -114,6 +135,7 @@ set(runtime_path_modifications
 
 set_tests_properties(
     model.task_service
+    model.task_ordering
     persistence.sqlite_task_repository
     viewmodel.task_viewmodels
     integration.task_creation_flow

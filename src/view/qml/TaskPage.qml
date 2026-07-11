@@ -79,6 +79,48 @@ Page {
             }
         }
 
+        // 查询控件只把会话级展示条件转发给 TaskListViewModel；筛选和排序不在 QML 中执行。
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            TextField {
+                id: taskSearchField
+                objectName: "taskSearchField"
+
+                Layout.fillWidth: true
+                Layout.minimumWidth: 240
+                text: root.appViewModel.taskList.searchText
+                placeholderText: qsTr("搜索任务标题或描述")
+                selectByMouse: true
+                onTextEdited: root.appViewModel.taskList.searchText = text
+            }
+
+            Label {
+                text: qsTr("优先级")
+                color: "#475467"
+            }
+
+            ComboBox {
+                id: priorityFilterComboBox
+                objectName: "priorityFilterComboBox"
+
+                Layout.preferredWidth: 150
+                model: root.appViewModel.taskList.priorityFilterOptions
+                currentIndex: root.appViewModel.taskList.priorityFilterIndex
+                onActivated: index => root.appViewModel.taskList.priorityFilterIndex = index
+            }
+
+            Button {
+                id: clearFiltersButton
+                objectName: "clearFiltersButton"
+
+                text: qsTr("清除条件")
+                visible: root.appViewModel.taskList.hasActiveFilters
+                onClicked: root.appViewModel.taskList.clearFilters()
+            }
+        }
+
         Label {
             Layout.fillWidth: true
             visible: text.length > 0
@@ -112,6 +154,7 @@ Page {
                     required property string statusText
                     required property string priorityText
                     required property string deadlineText
+                    required property string orderReasonText
                     required property int estimatedMinutes
 
                     width: ListView.view.width
@@ -165,6 +208,17 @@ Page {
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
                             }
+
+                            // 推荐理由由 Model 规划结果产生，View 只展示 ViewModel 映射后的文本。
+                            Label {
+                                objectName: "recommendationReasonLabel"
+                                Layout.fillWidth: true
+                                visible: taskDelegate.orderReasonText.length > 0
+                                text: qsTr("推荐理由：%1").arg(taskDelegate.orderReasonText)
+                                color: "#175cd3"
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
                         }
 
                         Button {
@@ -197,11 +251,14 @@ Page {
             }
 
             Label {
+                objectName: "taskEmptyStateLabel"
                 anchors.centerIn: parent
                 visible: root.appViewModel.taskList.count === 0
-                text: root.appViewModel.taskList.showArchived
-                      ? qsTr("还没有归档任务")
-                      : qsTr("还没有任务，从新建一项开始吧")
+                text: root.appViewModel.taskList.hasActiveFilters
+                      ? qsTr("没有符合当前搜索和筛选条件的任务")
+                      : root.appViewModel.taskList.showArchived
+                        ? qsTr("还没有归档任务")
+                        : qsTr("还没有任务，从新建一项开始吧")
                 color: "#667085"
                 font.pixelSize: 16
             }

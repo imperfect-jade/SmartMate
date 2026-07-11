@@ -17,6 +17,8 @@ public:
     /// 执行无副作用的权威业务校验：不访问 Repository，也不发出状态通知。
     [[nodiscard]] TaskValidationResult validateDraft(const TaskDraft &draft) const;
     [[nodiscard]] TaskListResult listTasks() const;
+    /// 读取任务快照并应用 Model 排序策略，不持久化随时间变化的推荐排名。
+    [[nodiscard]] TaskPlanResult listRecommendedTasks() const;
     [[nodiscard]] TaskResult findTask(const TaskId &id) const;
     /// 校验草稿、生成稳定 TaskId，并持久化新的领域快照。
     [[nodiscard]] TaskResult createTask(const TaskDraft &draft);

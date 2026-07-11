@@ -1,26 +1,60 @@
 #include "TaskListViewModel.h"
 
 #include "TaskErrorMapper.h"
+#include "planner/TaskOrderingPolicy.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
 
-#include <algorithm>
+#include <utility>
 
 namespace smartmate::viewmodel {
 
 namespace {
 constexpr auto deadlineFormat = "yyyy-MM-dd HH:mm";
+constexpr int allPrioritiesFilterIndex = 0;
+constexpr int firstPriorityFilterIndex = 1;
+constexpr int priorityFilterOptionCount = 5;
+
+[[nodiscard]] QString orderReasonText(const model::TaskOrderReason reason)
+{
+    using enum model::TaskOrderReason;
+
+    switch (reason) {
+    case InProgress:
+        return QStringLiteral("正在进行");
+    case Overdue:
+        return QStringLiteral("已逾期");
+    case UrgentPriority:
+        return QStringLiteral("紧急优先");
+    case HighPriority:
+        return QStringLiteral("高优先");
+    case UpcomingDeadline:
+        return QStringLiteral("截止较近");
+    case Todo:
+        return QStringLiteral("待办");
+    case Completed:
+        return QStringLiteral("已完成");
+    case Cancelled:
+        return QStringLiteral("已取消");
+    case Archived:
+        return QStringLiteral("已归档");
+    }
+    return {};
+}
 }
 
 TaskListViewModel::TaskListViewModel(model::TaskService &taskService, QObject *parent)
     : QAbstractListModel(parent)
     , m_taskService(taskService)
+    , m_reloadTimer(this)
 {
     // Service 是多个 ViewModel 共享的状态源；成功写入后的统一信号会触发
     // 列表重建，无需让编辑器或 QML 手动刷新本列表。
     connect(&m_taskService, &model::TaskService::tasksChanged, this,
             &TaskListViewModel::reload);
+    connect(&m_reloadTimer, &QTimer::timeout, this, &TaskListViewModel::reload);
+    m_reloadTimer.start(60'000);
     reload();
 }
 
@@ -64,6 +98,8 @@ QVariant TaskListViewModel::data(const QModelIndex &index, const int role) const
         return task.estimatedMinutes().has_value() ? *task.estimatedMinutes() : 0;
     case ArchivedRole:
         return task.status() == model::TaskStatus::Archived;
+    case OrderReasonTextRole:
+        return m_orderReasonTexts.value(task.id());
     default:
         return {};
     }
@@ -82,12 +118,38 @@ QHash<int, QByteArray> TaskListViewModel::roleNames() const
         {DeadlineTextRole, "deadlineText"},
         {EstimatedMinutesRole, "estimatedMinutes"},
         {ArchivedRole, "archived"},
+        {OrderReasonTextRole, "orderReasonText"},
     };
 }
 
 bool TaskListViewModel::showArchived() const noexcept
 {
     return m_showArchived;
+}
+
+QString TaskListViewModel::searchText() const
+{
+    return m_searchText;
+}
+
+int TaskListViewModel::priorityFilterIndex() const noexcept
+{
+    return m_priorityFilterIndex;
+}
+
+QStringList TaskListViewModel::priorityFilterOptions() const
+{
+    return {QStringLiteral("全部优先级"),
+            QStringLiteral("低"),
+            QStringLiteral("普通"),
+            QStringLiteral("高"),
+            QStringLiteral("紧急")};
+}
+
+bool TaskListViewModel::hasActiveFilters() const
+{
+    return !m_searchText.trimmed().isEmpty()
+        || m_priorityFilterIndex != allPrioritiesFilterIndex;
 }
 
 QString TaskListViewModel::errorMessage() const
@@ -106,25 +168,89 @@ void TaskListViewModel::setShowArchived(const bool showArchived)
     rebuildVisibleTasks();
 }
 
+void TaskListViewModel::setSearchText(const QString &searchText)
+{
+    if (m_searchText == searchText) {
+        return;
+    }
+
+    const bool previouslyActive = hasActiveFilters();
+    m_searchText = searchText;
+    emit searchTextChanged();
+    if (previouslyActive != hasActiveFilters()) {
+        emit hasActiveFiltersChanged();
+    }
+    rebuildVisibleTasks();
+}
+
+void TaskListViewModel::setPriorityFilterIndex(const int priorityFilterIndex)
+{
+    if (priorityFilterIndex < allPrioritiesFilterIndex
+        || priorityFilterIndex >= priorityFilterOptionCount
+        || m_priorityFilterIndex == priorityFilterIndex) {
+        return;
+    }
+
+    const bool previouslyActive = hasActiveFilters();
+    m_priorityFilterIndex = priorityFilterIndex;
+    emit priorityFilterIndexChanged();
+    if (previouslyActive != hasActiveFilters()) {
+        emit hasActiveFiltersChanged();
+    }
+    rebuildVisibleTasks();
+}
+
 void TaskListViewModel::reload()
 {
-    const auto result = m_taskService.listTasks();
+    const auto result = m_taskService.listRecommendedTasks();
     if (!result.ok()) {
         setError(taskErrorMessage(result.error));
         return;
     }
 
     setError({});
-    m_allTasks = *result.value;
-    // 这是确定性的展示排序而非任务规划算法；TaskId 用来打破更新时间相同的平局。
-    std::sort(m_allTasks.begin(), m_allTasks.end(), [](const model::Task &left,
-                                                       const model::Task &right) {
-        if (left.updatedAtUtc() != right.updatedAtUtc()) {
-            return left.updatedAtUtc() > right.updatedAtUtc();
-        }
-        return left.id().toString(QUuid::WithoutBraces)
-            < right.id().toString(QUuid::WithoutBraces);
-    });
+    QList<model::Task> allTasks;
+    QHash<model::TaskId, QString> orderReasonTexts;
+    allTasks.reserve(result.value->size());
+    orderReasonTexts.reserve(result.value->size());
+    // Model决定推荐顺序和语义理由；ViewModel只保存中文展示映射并继续筛选。
+    for (const model::PlannedTask &plannedTask : *result.value) {
+        allTasks.push_back(plannedTask.task);
+        orderReasonTexts.insert(plannedTask.task.id(),
+                                orderReasonText(plannedTask.reason));
+    }
+    // 分钟定时刷新若没有产生新顺序或理由，不重置QML模型，避免列表滚动位置跳动。
+    if (m_allTasks == allTasks && m_orderReasonTexts == orderReasonTexts) {
+        return;
+    }
+
+    m_allTasks = std::move(allTasks);
+    m_orderReasonTexts = std::move(orderReasonTexts);
+    rebuildVisibleTasks();
+}
+
+void TaskListViewModel::clearFilters()
+{
+    const bool searchChanged = !m_searchText.isEmpty();
+    const bool priorityChanged =
+        m_priorityFilterIndex != allPrioritiesFilterIndex;
+    if (!searchChanged && !priorityChanged) {
+        return;
+    }
+
+    const bool previouslyActive = hasActiveFilters();
+    m_searchText.clear();
+    m_priorityFilterIndex = allPrioritiesFilterIndex;
+    if (searchChanged) {
+        emit searchTextChanged();
+    }
+    if (priorityChanged) {
+        emit priorityFilterIndexChanged();
+    }
+    if (previouslyActive != hasActiveFilters()) {
+        emit hasActiveFiltersChanged();
+    }
+    // 批量清除只重建一次，避免QML列表短暂经过中间筛选状态。
     rebuildVisibleTasks();
 }
 
@@ -212,11 +338,27 @@ void TaskListViewModel::rebuildVisibleTasks()
     m_visibleTasks.clear();
     m_visibleTasks.reserve(m_allTasks.size());
 
+    const QString keyword = m_searchText.trimmed();
+    const bool filtersPriority =
+        m_priorityFilterIndex != allPrioritiesFilterIndex;
+    const auto selectedPriority = static_cast<model::TaskPriority>(
+        m_priorityFilterIndex - firstPriorityFilterIndex);
+
     for (const auto &task : m_allTasks) {
         const bool archived = task.status() == model::TaskStatus::Archived;
-        if (archived == m_showArchived) {
-            m_visibleTasks.push_back(task);
+        if (archived != m_showArchived) {
+            continue;
         }
+        if (!keyword.isEmpty()
+            && !task.title().contains(keyword, Qt::CaseInsensitive)
+            && !task.description().contains(keyword, Qt::CaseInsensitive)) {
+            continue;
+        }
+        if (filtersPriority && task.priority() != selectedPriority) {
+            continue;
+        }
+        // 过滤只删除不匹配项，剩余任务严格保留Model给出的计划顺序。
+        m_visibleTasks.push_back(task);
     }
 
     endResetModel();

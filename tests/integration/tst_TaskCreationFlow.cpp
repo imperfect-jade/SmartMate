@@ -19,6 +19,7 @@ class TaskCreationFlowTest final : public QObject {
 
 private slots:
     void createsAndReopensTaskWhenOptionalDescriptionIsUntouched();
+    void derivedSearchAndOrderingDoNotModifyStoredTasks();
 };
 
 void TaskCreationFlowTest::createsAndReopensTaskWhenOptionalDescriptionIsUntouched()
@@ -52,6 +53,38 @@ void TaskCreationFlowTest::createsAndReopensTaskWhenOptionalDescriptionIsUntouch
     QVERIFY(stored.has_value());
     QVERIFY(stored->description().isEmpty());
     QVERIFY(!stored->description().isNull());
+}
+
+void TaskCreationFlowTest::derivedSearchAndOrderingDoNotModifyStoredTasks()
+{
+    SqliteTaskRepository repository{QStringLiteral(":memory:")};
+    TaskService service{repository};
+
+    smartmate::model::TaskDraft urgentDraft;
+    urgentDraft.title = QStringLiteral("准备课程答辩");
+    urgentDraft.description = QStringLiteral("整理架构说明");
+    urgentDraft.priority = smartmate::model::TaskPriority::Urgent;
+    QVERIFY(service.createTask(urgentDraft).ok());
+
+    smartmate::model::TaskDraft lowDraft;
+    lowDraft.title = QStringLiteral("清理草稿");
+    lowDraft.priority = smartmate::model::TaskPriority::Low;
+    QVERIFY(service.createTask(lowDraft).ok());
+
+    AppViewModel appViewModel{service};
+    auto *taskList = appViewModel.taskList();
+    const auto before = repository.findAll();
+    QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
+
+    taskList->setSearchText(QStringLiteral("架构"));
+    taskList->setPriorityFilterIndex(4);
+    QCOMPARE(taskList->count(), 1);
+    taskList->clearFilters();
+    taskList->reload();
+
+    const auto after = repository.findAll();
+    QCOMPARE(changedSpy.count(), 0);
+    QVERIFY(after == before);
 }
 
 // Qt SQL 连接依赖 QCoreApplication 生命周期，测试无需 GUI 事件环境。

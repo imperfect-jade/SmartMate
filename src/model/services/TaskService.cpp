@@ -1,6 +1,7 @@
 #include "services/TaskService.h"
 
 #include "domain/TaskConstraints.h"
+#include "planner/TaskOrderingPolicy.h"
 
 #include <QDateTime>
 
@@ -94,6 +95,18 @@ constexpr int maximumDescriptionLength = 5000;
                                    QStringLiteral("Unexpected repository failure."));
 }
 
+[[nodiscard]] TaskPlanResult persistencePlanFailure(const RepositoryException &exception)
+{
+    return TaskPlanResult::failure(TaskError::PersistenceFailure,
+                                   QString::fromUtf8(exception.what()));
+}
+
+[[nodiscard]] TaskPlanResult unexpectedPersistencePlanFailure()
+{
+    return TaskPlanResult::failure(TaskError::PersistenceFailure,
+                                   QStringLiteral("Unexpected repository failure."));
+}
+
 [[nodiscard]] Task makeTask(const Task &source,
                             const TaskDraft &draft,
                             std::optional<TaskStatus> statusBeforeArchive,
@@ -170,6 +183,18 @@ TaskListResult TaskService::listTasks() const
         return persistenceListFailure(exception);
     } catch (...) {
         return unexpectedPersistenceListFailure();
+    }
+}
+
+TaskPlanResult TaskService::listRecommendedTasks() const
+{
+    try {
+        return TaskPlanResult::success(
+            orderTasks(m_repository.findAll(), QDateTime::currentDateTimeUtc()));
+    } catch (const RepositoryException &exception) {
+        return persistencePlanFailure(exception);
+    } catch (...) {
+        return unexpectedPersistencePlanFailure();
     }
 }
 

@@ -3,6 +3,8 @@ add_library(smartmate_model STATIC
     domain/Task.cpp
     domain/TaskConstraints.h
     domain/TaskTypes.h
+    planner/TaskOrderingPolicy.h
+    planner/TaskOrderingPolicy.cpp
     repositories/ITaskRepository.h
     services/TaskService.h
     services/TaskService.cpp

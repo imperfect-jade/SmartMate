@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Task.h"
+#include "planner/TaskOrderingPolicy.h"
 
 #include <QList>
 #include <QString>
@@ -81,5 +82,6 @@ struct ServiceResult final {
 
 using TaskResult = ServiceResult<Task>;
 using TaskListResult = ServiceResult<QList<Task>>;
+using TaskPlanResult = ServiceResult<QList<PlannedTask>>;
 
 } // namespace smartmate::model
