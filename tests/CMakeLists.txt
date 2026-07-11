@@ -16,6 +16,88 @@ target_link_libraries(tst_task_service
 
 add_test(NAME model.task_service COMMAND tst_task_service)
 
+qt_add_executable(tst_sqlite_task_repository
+    persistence/tst_SqliteTaskRepository.cpp
+)
+
+target_link_libraries(tst_sqlite_task_repository
+    PRIVATE
+        smartmate_persistence
+        Qt6::Sql
+        Qt6::Test
+)
+
+add_test(
+    NAME persistence.sqlite_task_repository
+    COMMAND tst_sqlite_task_repository
+)
+
+qt_add_executable(tst_task_viewmodels
+    viewmodel/tst_TaskViewModels.cpp
+    fakes/FakeTaskRepository.h
+)
+
+target_include_directories(tst_task_viewmodels
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(tst_task_viewmodels
+    PRIVATE
+        smartmate_viewmodel
+        Qt6::Test
+)
+
+add_test(NAME viewmodel.task_viewmodels COMMAND tst_task_viewmodels)
+
+qt_add_executable(tst_task_creation_flow
+    integration/tst_TaskCreationFlow.cpp
+)
+
+target_link_libraries(tst_task_creation_flow
+    PRIVATE
+        smartmate_persistence
+        smartmate_viewmodel
+        Qt6::Sql
+        Qt6::Test
+)
+
+add_test(NAME integration.task_creation_flow COMMAND tst_task_creation_flow)
+
+qt_add_executable(tst_qml_pickers
+    qml/quicktest_main.cpp
+)
+
+target_compile_definitions(tst_qml_pickers
+    PRIVATE
+        QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+)
+
+target_link_libraries(tst_qml_pickers
+    PRIVATE
+        smartmate_viewmodel
+        smartmate_viewmodelplugin
+        smartmate_ui
+        smartmate_uiplugin
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::QuickTest
+)
+
+# QuickTest需要把静态QML模块的插件和资源导入测试进程，才能按URI创建选择器。
+qt_import_qml_plugins(tst_qml_pickers)
+
+add_test(
+    NAME view.qml_pickers
+    COMMAND tst_qml_pickers -platform offscreen
+)
+set_tests_properties(
+    view.qml_pickers
+    PROPERTIES
+        ENVIRONMENT "QT_QUICK_BACKEND=software"
+        TIMEOUT 15
+)
+
 add_test(
     NAME view.qml_bootstrap
     COMMAND SmartMate --smoke-test -platform offscreen
@@ -32,6 +114,10 @@ set(runtime_path_modifications
 
 set_tests_properties(
     model.task_service
+    persistence.sqlite_task_repository
+    viewmodel.task_viewmodels
+    integration.task_creation_flow
+    view.qml_pickers
     view.qml_bootstrap
     PROPERTIES
         ENVIRONMENT_MODIFICATION

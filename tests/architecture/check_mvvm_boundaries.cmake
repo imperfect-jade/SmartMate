@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
+# 将文档中的 MVVM 依赖约束变成可执行守卫，防止后续功能通过跨层捷径实现。
 if(NOT DEFINED ROOT_DIR)
     message(FATAL_ERROR "ROOT_DIR must point to the SmartMate source tree")
 endif()
@@ -14,6 +15,7 @@ function(record_violation source_file rule)
 endfunction()
 
 function(scan_includes source_root layer_name)
+    # 按层扫描 include，发现反向依赖或把 UI/SQL API 泄漏到错误层时统一报告。
     set(forbidden_patterns ${ARGN})
     file(GLOB_RECURSE source_files LIST_DIRECTORIES FALSE
         "${source_root}/*.h"
@@ -51,10 +53,15 @@ scan_includes("${ROOT_DIR}/src/model/repositories" "Repository interface"
     "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
     "viewmodel" "view/")
 
+scan_includes("${ROOT_DIR}/src/model/persistence" "Model persistence"
+    "qtquick" "qquick" "qtqml" "qqml"
+    "viewmodel" "view/")
+
 scan_includes("${ROOT_DIR}/src/viewmodel" "ViewModel"
     "qtquick" "qquick" "qqmlengine" "qqmlcontext" "qtsql" "qsql"
     "model/persistence" "view/")
 
+# include 检查之外，再验证 CMake 链接关系，避免通过传递依赖绕过边界。
 set(model_cmake "${ROOT_DIR}/src/model/CMakeLists.txt")
 if(EXISTS "${model_cmake}")
     file(READ "${model_cmake}" model_cmake_contents)
@@ -62,6 +69,24 @@ if(EXISTS "${model_cmake}")
     if(model_cmake_lower MATCHES "qt6::(quick|qml|sql)")
         record_violation("${model_cmake}"
             "smartmate_model may link only Qt Core, not Quick/Qml/Sql")
+    endif()
+endif()
+
+set(persistence_cmake "${ROOT_DIR}/src/model/persistence/CMakeLists.txt")
+if(EXISTS "${persistence_cmake}")
+    file(READ "${persistence_cmake}" persistence_cmake_contents)
+    string(TOLOWER "${persistence_cmake_contents}" persistence_cmake_lower)
+    if(NOT persistence_cmake_lower MATCHES "smartmate_model")
+        record_violation("${persistence_cmake}"
+            "smartmate_persistence must depend on smartmate_model")
+    endif()
+    if(NOT persistence_cmake_lower MATCHES "qt6::sql")
+        record_violation("${persistence_cmake}"
+            "smartmate_persistence must own the Qt SQL dependency")
+    endif()
+    if(persistence_cmake_lower MATCHES "smartmate_viewmodel|qt6::(quick|qml)")
+        record_violation("${persistence_cmake}"
+            "smartmate_persistence may not depend on ViewModel, Qt Quick, or QML")
     endif()
 endif()
 
@@ -79,8 +104,19 @@ if(EXISTS "${viewmodel_cmake}")
     endif()
 endif()
 
+set(view_cmake "${ROOT_DIR}/src/view/CMakeLists.txt")
+if(EXISTS "${view_cmake}")
+    file(READ "${view_cmake}" view_cmake_contents)
+    string(TOLOWER "${view_cmake_contents}" view_cmake_lower)
+    if(view_cmake_lower MATCHES "smartmate_persistence|qt6::sql")
+        record_violation("${view_cmake}"
+            "smartmate_ui may not link concrete persistence or Qt SQL")
+    endif()
+endif()
+
 file(GLOB_RECURSE qml_files LIST_DIRECTORIES FALSE
     "${ROOT_DIR}/src/view/*.qml")
+# View 只能绑定 ViewModel；这些检查阻止 QML 直接接触 Model、Service 或 SQL。
 foreach(qml_file IN LISTS qml_files)
     file(READ "${qml_file}" qml_contents)
     string(TOLOWER "${qml_contents}" qml_lower)
@@ -99,6 +135,7 @@ foreach(qml_file IN LISTS qml_files)
     endif()
 endforeach()
 
+# 项目明确采用 MVVM，因此额外禁止重新引入 Controller 层或类型。
 file(GLOB_RECURSE production_entries LIST_DIRECTORIES TRUE
     "${ROOT_DIR}/src/*")
 foreach(entry IN LISTS production_entries)

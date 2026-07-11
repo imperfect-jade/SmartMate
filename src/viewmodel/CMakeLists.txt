@@ -5,6 +5,12 @@ qt_add_qml_module(smartmate_viewmodel
     SOURCES
         AppViewModel.h
         AppViewModel.cpp
+        TaskEditorViewModel.h
+        TaskEditorViewModel.cpp
+        TaskErrorMapper.h
+        TaskErrorMapper.cpp
+        TaskListViewModel.h
+        TaskListViewModel.cpp
 )
 
 target_include_directories(smartmate_viewmodel

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
     [string] $Configuration = 'Release',
@@ -72,7 +72,25 @@ $buildDirectory = Join-Path $repositoryRoot "build/$preset"
 $sourceExecutable = Join-Path $buildDirectory 'SmartMate.exe'
 $qmlSourceDirectory = Join-Path $repositoryRoot 'src/view/qml'
 $qmlImportDirectory = Join-Path $buildDirectory 'qml'
+# Debug构建不等于一定安装了Debug版Qt；先探测DLL，再选择windeployqt运行库模式。
+$debugRuntimeCandidates = @(
+    (Join-Path $qtBinDirectory 'Qt6Cored.dll'),
+    (Join-Path $QtRoot 'plugins/platforms/qwindowsd.dll'),
+    (Join-Path $QtRoot 'plugins/sqldrivers/qsqlited.dll')
+)
+$missingDebugRuntimeFiles = @(
+    $debugRuntimeCandidates | Where-Object {
+        -not (Test-Path -LiteralPath $_ -PathType Leaf)
+    }
+)
+$hasDebugQtRuntime = $missingDebugRuntimeFiles.Count -eq 0
+$runtimeMode = if ($Configuration -eq 'Debug' -and $hasDebugQtRuntime) {
+    'debug'
+} else {
+    'release'
+}
 
+# 递归清理前先规范化绝对路径，并确认目标严格位于仓库dist目录内。
 $distributionRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'dist'))
 $distributionDirectory = [System.IO.Path]::GetFullPath((Join-Path $distributionRoot 'SmartMate'))
 $allowedPrefix = $distributionRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
@@ -85,6 +103,7 @@ if (-not $distributionDirectory.StartsWith(
 
 $env:QT_ROOT = $QtRoot
 $env:QT_MINGW_ROOT = $QtMinGwRoot
+# 配套Qt与MinGW必须排在PATH最前，防止全局编译器造成ABI混用。
 $env:PATH = "$qtBinDirectory;$mingwBinDirectory;$env:PATH"
 
 Push-Location $repositoryRoot
@@ -106,6 +125,7 @@ try {
     }
 
     if (Test-Path -LiteralPath $distributionDirectory) {
+        # 此递归删除依赖上方的dist子目录校验，不得绕过或拆分两段安全逻辑。
         Remove-Item -LiteralPath $distributionDirectory -Recurse -Force
     }
 
@@ -114,8 +134,12 @@ try {
     Copy-Item -LiteralPath $sourceExecutable -Destination $deployedExecutable
 
     Write-Host '[3/4] Collect Qt, QML, and MinGW runtime files'
+    if ($Configuration -eq 'Debug' -and -not $hasDebugQtRuntime) {
+        Write-Host 'Qt debug DLLs are not installed; deploy the Debug build with the matching release Qt runtime.'
+    }
+    # windeployqt扫描QML导入并收集Qt/MinGW运行库；qoffscreen供无界面启动验证使用。
     $deployArguments = @(
-        "--$preset",
+        "--$runtimeMode",
         '--compiler-runtime',
         '--no-system-dxc-compiler',
         '--include-plugins', 'qoffscreen',
@@ -132,17 +156,20 @@ try {
         -Arguments $deployArguments `
         -FailureMessage 'windeployqt failed'
 
-    $debugSuffix = if ($Configuration -eq 'Debug') { 'd' } else { '' }
+    # 交付前显式检查核心DLL、平台插件和qsqlite，避免只在开发机上能够启动。
+    $debugSuffix = if ($runtimeMode -eq 'debug') { 'd' } else { '' }
     $requiredRelativePaths = @(
         'SmartMate.exe',
         "Qt6Core$debugSuffix.dll",
         "Qt6Gui$debugSuffix.dll",
         "Qt6Qml$debugSuffix.dll",
+        "Qt6Sql$debugSuffix.dll",
         'libgcc_s_seh-1.dll',
         'libstdc++-6.dll',
         'libwinpthread-1.dll',
         "platforms/qwindows$debugSuffix.dll",
-        "platforms/qoffscreen$debugSuffix.dll"
+        "platforms/qoffscreen$debugSuffix.dll",
+        "sqldrivers/qsqlite$debugSuffix.dll"
     )
 
     $missingFiles = @(

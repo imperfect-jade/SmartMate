@@ -6,7 +6,9 @@ qt_add_executable(SmartMate WIN32
 
 target_link_libraries(SmartMate
     PRIVATE
+        # App是唯一组合根，因此只有可执行目标链接具体Persistence和各层模块。
         smartmate_model
+        smartmate_persistence
         smartmate_viewmodel
         smartmate_viewmodelplugin
         smartmate_ui

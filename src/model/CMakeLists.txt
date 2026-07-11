@@ -1,10 +1,12 @@
 add_library(smartmate_model STATIC
     domain/Task.h
     domain/Task.cpp
+    domain/TaskConstraints.h
     domain/TaskTypes.h
     repositories/ITaskRepository.h
     services/TaskService.h
     services/TaskService.cpp
+    services/TaskResult.h
 )
 
 target_include_directories(smartmate_model
