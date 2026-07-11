@@ -16,15 +16,11 @@ TestCase {
     Component {
         id: taskPageComponent
 
-        ApplicationWindow {
+        Main {
             width: 1000
             height: 760
             visible: true
-
-            TaskPage {
-                anchors.fill: parent
-                appViewModel: testAppViewModel
-            }
+            appViewModel: testAppViewModel
         }
     }
 

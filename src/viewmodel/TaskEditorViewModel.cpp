@@ -2,11 +2,13 @@
 
 #include "TaskErrorMapper.h"
 #include "domain/TaskConstraints.h"
+#include "domain/TaskCreationRequest.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
 #include <QStringList>
 
+#include <algorithm>
 #include <utility>
 
 namespace smartmate::viewmodel {
@@ -40,12 +42,57 @@ TaskEditorViewModel::TaskEditorViewModel(model::TaskService &taskService, QObjec
 TaskEditorViewModel::TaskEditorViewModel(model::TaskService &taskService,
                                          QTimeZone timeZone,
                                          QObject *parent)
-    : QObject(parent)
+    : QAbstractListModel(parent)
     , m_taskService(taskService)
     , m_timeZone(std::move(timeZone))
 {
     rememberCurrentDraft();
     updateFormState();
+}
+
+int TaskEditorViewModel::rowCount(const QModelIndex &parent) const
+{
+    return parent.isValid() ? 0 : static_cast<int>(m_predecessorCandidates.size());
+}
+
+QVariant TaskEditorViewModel::data(const QModelIndex &index, const int role) const
+{
+    if (!index.isValid() || index.row() < 0
+        || index.row() >= m_predecessorCandidates.size()) {
+        return {};
+    }
+
+    const model::Task &candidate = m_predecessorCandidates.at(index.row());
+    switch (role) {
+    case CandidateTaskIdRole:
+        return candidate.id().toString(QUuid::WithoutBraces);
+    case CandidateShortIdRole:
+        return candidate.id().toString(QUuid::WithoutBraces).left(8);
+    case CandidateTitleRole:
+        return candidate.title();
+    case CandidateStatusTextRole:
+        return statusText(candidate.status());
+    case CandidatePriorityTextRole:
+        return priorityText(candidate.priority());
+    case CandidateSelectedRole:
+        return (m_predecessorPickerActive ? m_pickerPredecessors
+                                          : m_selectedCreationPredecessors)
+            .contains(candidate.id());
+    default:
+        return {};
+    }
+}
+
+QHash<int, QByteArray> TaskEditorViewModel::roleNames() const
+{
+    return {
+        {CandidateTaskIdRole, "candidateTaskId"},
+        {CandidateShortIdRole, "candidateShortId"},
+        {CandidateTitleRole, "candidateTitle"},
+        {CandidateStatusTextRole, "candidateStatusText"},
+        {CandidatePriorityTextRole, "candidatePriorityText"},
+        {CandidateSelectedRole, "candidateSelected"},
+    };
 }
 
 QString TaskEditorViewModel::taskId() const
@@ -255,10 +302,47 @@ QString TaskEditorViewModel::errorMessage() const
     return m_errorMessage;
 }
 
-void TaskEditorViewModel::beginCreate()
+int TaskEditorViewModel::predecessorCandidateCount() const noexcept
 {
-    // 新建和编辑都只替换 ViewModel 草稿，不提前写入 Model。
+    return static_cast<int>(m_predecessorCandidates.size());
+}
+
+int TaskEditorViewModel::selectedPredecessorCount() const noexcept
+{
+    return static_cast<int>((m_predecessorPickerActive
+                                 ? m_pickerPredecessors
+                                 : m_selectedCreationPredecessors)
+                                .size());
+}
+
+QString TaskEditorViewModel::predecessorSummaryText() const
+{
+    const QSet<model::TaskId> &selection = m_predecessorPickerActive
+        ? m_pickerPredecessors
+        : m_selectedCreationPredecessors;
+    if (selection.isEmpty()) {
+        return QStringLiteral("未设置");
+    }
+    return QStringLiteral("已选择 %1 项").arg(selection.size());
+}
+
+bool TaskEditorViewModel::canConfigurePredecessors() const noexcept
+{
+    return !m_editMode;
+}
+
+bool TaskEditorViewModel::beginCreate()
+{
+    // 候选资格由 Model 给出；ViewModel 只保存用于多选弹窗的展示快照。
+    const auto candidates = m_taskService.listEligibleCreationPredecessors();
+    if (!candidates.ok()) {
+        setErrorMessage(taskErrorMessage(candidates.error));
+        return false;
+    }
+
+    replaceCandidates(*candidates.value);
     replaceDraft(Snapshot{}, {}, false);
+    return true;
 }
 
 bool TaskEditorViewModel::beginEdit(const QString &taskId)
@@ -284,6 +368,7 @@ bool TaskEditorViewModel::beginEdit(const QString &taskId)
     draft.deadline = task.deadline();
     draft.estimatedMinutes = task.estimatedMinutes();
 
+    replaceCandidates({});
     replaceDraft(draft, task.id().toString(QUuid::WithoutBraces), true);
     return true;
 }
@@ -365,6 +450,95 @@ void TaskEditorViewModel::clearEstimatedDuration()
     updateFormState();
 }
 
+void TaskEditorViewModel::beginPredecessorSelection()
+{
+    if (!canConfigurePredecessors()) {
+        return;
+    }
+    m_pickerPredecessors = m_selectedCreationPredecessors;
+    m_predecessorPickerActive = true;
+    notifyCandidateSelectionChanged();
+}
+
+bool TaskEditorViewModel::setCreationPredecessorSelected(const QString &taskId,
+                                                         const bool selected)
+{
+    if (!m_predecessorPickerActive) {
+        return false;
+    }
+
+    const model::TaskId id = QUuid::fromString(taskId.trimmed());
+    const int row = candidateRow(id);
+    if (id.isNull() || row < 0) {
+        return false;
+    }
+
+    const bool alreadySelected = m_pickerPredecessors.contains(id);
+    const bool changed = alreadySelected != selected;
+    if (selected) {
+        m_pickerPredecessors.insert(id);
+    } else {
+        m_pickerPredecessors.remove(id);
+    }
+    if (changed) {
+        emit dataChanged(index(row), index(row), {CandidateSelectedRole});
+        emit predecessorSelectionChanged();
+    }
+    return true;
+}
+
+void TaskEditorViewModel::acceptPredecessorSelection()
+{
+    if (!m_predecessorPickerActive) {
+        return;
+    }
+
+    m_predecessorPickerActive = false;
+    if (m_selectedCreationPredecessors == m_pickerPredecessors) {
+        return;
+    }
+    m_selectedCreationPredecessors = m_pickerPredecessors;
+    emit predecessorSelectionChanged();
+    setErrorMessage({});
+    updateFormState();
+}
+
+void TaskEditorViewModel::cancelPredecessorSelection()
+{
+    if (!m_predecessorPickerActive) {
+        return;
+    }
+    const bool selectionChanged = m_pickerPredecessors != m_selectedCreationPredecessors;
+    m_pickerPredecessors = m_selectedCreationPredecessors;
+    m_predecessorPickerActive = false;
+    if (selectionChanged) {
+        notifyCandidateSelectionChanged();
+        emit predecessorSelectionChanged();
+    }
+}
+
+void TaskEditorViewModel::clearCreationPredecessors()
+{
+    if (m_predecessorPickerActive) {
+        if (m_pickerPredecessors.isEmpty()) {
+            return;
+        }
+        m_pickerPredecessors.clear();
+        emit predecessorSelectionChanged();
+        notifyCandidateSelectionChanged();
+        return;
+    }
+    if (m_selectedCreationPredecessors.isEmpty()) {
+        return;
+    }
+    m_selectedCreationPredecessors.clear();
+    m_pickerPredecessors.clear();
+    emit predecessorSelectionChanged();
+    notifyCandidateSelectionChanged();
+    setErrorMessage({});
+    updateFormState();
+}
+
 bool TaskEditorViewModel::save()
 {
     // 命令入口自身也必须守住状态，不能只依赖 QML 将保存按钮设为不可用。
@@ -392,7 +566,16 @@ bool TaskEditorViewModel::save()
         }
         result = m_taskService.updateTask(id, *draft);
     } else {
-        result = m_taskService.createTask(*draft);
+        QList<model::TaskId> predecessorIds = m_selectedCreationPredecessors.values();
+        std::sort(predecessorIds.begin(), predecessorIds.end(),
+                  [](const model::TaskId &left, const model::TaskId &right) {
+                      return left.toString(QUuid::WithoutBraces)
+                          < right.toString(QUuid::WithoutBraces);
+                  });
+        result = m_taskService.createTask(model::TaskCreationRequest{
+            *draft,
+            std::move(predecessorIds),
+        });
     }
 
     if (!result.ok()) {
@@ -413,6 +596,9 @@ bool TaskEditorViewModel::save()
 void TaskEditorViewModel::cancel()
 {
     setErrorMessage({});
+    // 主表单取消后立即丢弃字段、候选与已接受依赖，下一次打开不会继承旧草稿。
+    replaceCandidates({});
+    replaceDraft(Snapshot{}, {}, false);
     emit cancelled();
 }
 
@@ -425,6 +611,7 @@ TaskEditorViewModel::Snapshot TaskEditorViewModel::currentSnapshot() const
         m_priorityIndex,
         m_deadline,
         m_estimatedMinutes,
+        m_selectedCreationPredecessors,
     };
 }
 
@@ -439,6 +626,9 @@ void TaskEditorViewModel::replaceDraft(const Snapshot &draft, const QString &tas
     m_priorityIndex = draft.priorityIndex;
     m_deadline = draft.deadline;
     m_estimatedMinutes = draft.estimatedMinutes;
+    m_selectedCreationPredecessors = draft.predecessorIds;
+    m_pickerPredecessors = m_selectedCreationPredecessors;
+    m_predecessorPickerActive = false;
     m_original = draft;
 
     emit modeChanged();
@@ -448,8 +638,26 @@ void TaskEditorViewModel::replaceDraft(const Snapshot &draft, const QString &tas
     emit priorityIndexChanged();
     emit deadlineChanged();
     emit estimatedDurationChanged();
+    emit predecessorSelectionChanged();
+    notifyCandidateSelectionChanged();
     setErrorMessage({});
     updateFormState();
+}
+
+void TaskEditorViewModel::replaceCandidates(QList<model::Task> candidates)
+{
+    beginResetModel();
+    m_predecessorCandidates = std::move(candidates);
+    endResetModel();
+    emit predecessorCandidatesChanged();
+}
+
+void TaskEditorViewModel::notifyCandidateSelectionChanged()
+{
+    if (!m_predecessorCandidates.isEmpty()) {
+        emit dataChanged(index(0), index(m_predecessorCandidates.size() - 1),
+                         {CandidateSelectedRole});
+    }
 }
 
 void TaskEditorViewModel::rememberCurrentDraft()
@@ -467,6 +675,10 @@ void TaskEditorViewModel::updateFormState()
                   m_deadline, m_estimatedMinutes));
     if (!validation.ok()) {
         validationMessage = taskErrorMessage(validation.error);
+    }
+    if (!m_editMode && !m_selectedCreationPredecessors.isEmpty()
+        && m_statusIndex != static_cast<int>(model::TaskStatus::Todo)) {
+        validationMessage = QStringLiteral("设置前置任务后，新任务状态必须为待办。");
     }
 
     const bool dirty = currentSnapshot() != m_original;
@@ -509,6 +721,48 @@ std::optional<QDateTime> TaskEditorViewModel::displayedDeadline() const
         return std::nullopt;
     }
     return m_deadline->toTimeZone(m_timeZone);
+}
+
+int TaskEditorViewModel::candidateRow(const model::TaskId &taskId) const
+{
+    for (int row = 0; row < m_predecessorCandidates.size(); ++row) {
+        if (m_predecessorCandidates.at(row).id() == taskId) {
+            return row;
+        }
+    }
+    return -1;
+}
+
+QString TaskEditorViewModel::statusText(const model::TaskStatus status)
+{
+    switch (status) {
+    case model::TaskStatus::Todo:
+        return QStringLiteral("待办");
+    case model::TaskStatus::InProgress:
+        return QStringLiteral("进行中");
+    case model::TaskStatus::Done:
+        return QStringLiteral("已完成");
+    case model::TaskStatus::Cancelled:
+        return QStringLiteral("已取消");
+    case model::TaskStatus::Archived:
+        return QStringLiteral("已归档");
+    }
+    return QStringLiteral("未知");
+}
+
+QString TaskEditorViewModel::priorityText(const model::TaskPriority priority)
+{
+    switch (priority) {
+    case model::TaskPriority::Low:
+        return QStringLiteral("低");
+    case model::TaskPriority::Normal:
+        return QStringLiteral("普通");
+    case model::TaskPriority::High:
+        return QStringLiteral("高");
+    case model::TaskPriority::Urgent:
+        return QStringLiteral("紧急");
+    }
+    return QStringLiteral("未知");
 }
 
 } // namespace smartmate::viewmodel

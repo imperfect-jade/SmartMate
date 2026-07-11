@@ -20,7 +20,8 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
     : m_taskRepository(
           std::make_unique<model::persistence::SqliteTaskRepository>(std::move(databasePath)))
     , m_taskService(
-          std::make_unique<model::TaskService>(*m_taskRepository, *m_taskRepository))
+          std::make_unique<model::TaskService>(
+              *m_taskRepository, *m_taskRepository, *m_taskRepository))
 {
     // 在创建界面前验证数据源可读，避免用一个已经失效的 Service 启动 ViewModel。
     const model::TaskListResult initialTasks = m_taskService->listTasks();
@@ -53,6 +54,8 @@ void AppBootstrapper::configure(QQmlApplicationEngine &engine)
     QQmlEngine::setObjectOwnership(m_appViewModel->taskList(), QQmlEngine::CppOwnership);
     QQmlEngine::setObjectOwnership(m_appViewModel->taskEditor(), QQmlEngine::CppOwnership);
     QQmlEngine::setObjectOwnership(m_appViewModel->taskDependencies(),
+                                   QQmlEngine::CppOwnership);
+    QQmlEngine::setObjectOwnership(m_appViewModel->taskGraph(),
                                    QQmlEngine::CppOwnership);
 
     // 通过根组件的 required property 显式注入依赖，避免隐式全局状态。

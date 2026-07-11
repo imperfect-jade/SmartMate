@@ -6,6 +6,7 @@ import SmartMate.ViewModel 1.0
 // 表单只绑定 ViewModel 草稿并转发输入；校验规则和保存结果不在 QML 中判断。
 Dialog {
     id: root
+    objectName: "taskEditorDialog"
 
     required property TaskEditorViewModel editor
 
@@ -42,7 +43,7 @@ Dialog {
     }
 
     width: 560
-    height: Math.min(610, parent ? parent.height - 40 : 610)
+    height: Math.min(680, parent ? parent.height - 40 : 680)
     modal: true
     focus: true
     closePolicy: Popup.NoAutoClose
@@ -119,6 +120,56 @@ Dialog {
                         currentIndex: root.editor.priorityIndex
                         onActivated: index => root.editor.priorityIndex = index
                     }
+                }
+            }
+
+            // 只有新建模式显示前置草稿；编辑已保存任务仍使用独立的依赖编辑器。
+            Label {
+                visible: root.editor.canConfigurePredecessors
+                text: qsTr("前置任务")
+                font.bold: true
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                visible: root.editor.canConfigurePredecessors
+                spacing: 8
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 40
+                    radius: 4
+                    color: "#f9fafb"
+                    border.color: "#d0d5dd"
+
+                    Label {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        verticalAlignment: Text.AlignVCenter
+                        text: root.editor.predecessorSummaryText
+                        color: root.editor.selectedPredecessorCount > 0
+                               ? "#172033" : "#667085"
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Button {
+                    objectName: "openCreationPredecessorButton"
+                    text: root.editor.selectedPredecessorCount > 0
+                          ? qsTr("修改") : qsTr("选择")
+                    enabled: root.editor.predecessorCandidateCount > 0
+                    onClicked: {
+                        root.editor.beginPredecessorSelection()
+                        creationPredecessorDialog.open()
+                    }
+                }
+
+                Button {
+                    objectName: "clearCreationPredecessorButton"
+                    visible: root.editor.selectedPredecessorCount > 0
+                    text: qsTr("清除")
+                    onClicked: root.editor.clearCreationPredecessors()
                 }
             }
 
@@ -268,5 +319,11 @@ Dialog {
         onSelectionAccepted: (days, hours, minutes) => {
             root.editor.setEstimatedDuration(days, hours, minutes)
         }
+    }
+
+    TaskCreationPredecessorDialog {
+        id: creationPredecessorDialog
+        anchors.centerIn: Overlay.overlay
+        editor: root.editor
     }
 }

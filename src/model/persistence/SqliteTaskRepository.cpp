@@ -549,4 +549,64 @@ void SqliteTaskRepository::replacePredecessors(
     }
 }
 
+void SqliteTaskRepository::insertTaskWithPredecessors(
+    const Task &task,
+    const QList<TaskId> &predecessorIds)
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    if (!database.transaction()) {
+        throwDatabaseError(
+            QStringLiteral("Cannot start atomic task creation transaction"),
+            database.lastError());
+    }
+
+    try {
+        // 任务和前置边属于一个创建命令。任务先写入以满足后继外键；任意一条边失败时，
+        // catch中的rollback会同时撤销任务和已经成功写入的边，避免产生半成品任务。
+        QSqlQuery taskQuery(database);
+        taskQuery.prepare(QStringLiteral(
+            "INSERT INTO tasks ("
+            "id, title, description, priority, status, status_before_archive, "
+            "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms"
+            ") VALUES ("
+            ":id, :title, :description, :priority, :status, :status_before_archive, "
+            ":deadline_utc_ms, :estimated_minutes, :created_at_utc_ms, :updated_at_utc_ms"
+            ")"));
+        bindTask(taskQuery, task);
+        if (!taskQuery.exec()) {
+            throwDatabaseError(QStringLiteral("Cannot atomically insert task"),
+                               taskQuery.lastError());
+        }
+        taskQuery.finish();
+
+        QSqlQuery dependencyQuery(database);
+        dependencyQuery.prepare(QStringLiteral(
+            "INSERT INTO task_dependencies (predecessor_id, successor_id) "
+            "VALUES (:predecessor_id, :successor_id)"));
+        const QString successorId = task.id().toString(QUuid::WithoutBraces);
+        for (const TaskId &predecessorId : predecessorIds) {
+            dependencyQuery.bindValue(
+                QStringLiteral(":predecessor_id"),
+                predecessorId.toString(QUuid::WithoutBraces));
+            dependencyQuery.bindValue(QStringLiteral(":successor_id"), successorId);
+            if (!dependencyQuery.exec()) {
+                throwDatabaseError(
+                    QStringLiteral("Cannot atomically insert task dependency"),
+                    dependencyQuery.lastError());
+            }
+            dependencyQuery.finish();
+        }
+
+        if (!database.commit()) {
+            throwDatabaseError(
+                QStringLiteral("Cannot commit atomic task creation transaction"),
+                database.lastError());
+        }
+    } catch (...) {
+        // commit失败也尝试回滚；SQLite会在连接继续使用前恢复到一致状态。
+        database.rollback();
+        throw;
+    }
+}
+
 } // namespace smartmate::model::persistence

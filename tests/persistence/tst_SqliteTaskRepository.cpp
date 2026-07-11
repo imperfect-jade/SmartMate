@@ -135,6 +135,19 @@ void createVersionOneDatabase(const QString &databasePath, const Task &task)
     return false;
 }
 
+[[nodiscard]] bool atomicCreationThrows(
+    SqliteTaskRepository &repository,
+    const Task &task,
+    const QList<QUuid> &predecessorIds)
+{
+    try {
+        repository.insertTaskWithPredecessors(task, predecessorIds);
+    } catch (const RepositoryException &) {
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 // 验证领域值与SQLite的双向映射、重复初始化安全性和数据库级约束。
@@ -157,6 +170,9 @@ private slots:
     void enforcesDependencyIdentityForeignKeysAndCycles();
     void restrictsDeletingTasksReferencedByDependencies();
     void replacePredecessorsRollsBackAtomically();
+    void atomicallyCreatesTaskWithPredecessorsAcrossReopen();
+    void atomicCreationRollsBackTaskAfterMidwayEdgeFailure();
+    void atomicCreationRollsBackOnTaskOrSelfDependencyConstraint();
 };
 
 void SqliteTaskRepositoryTest::initializesSchemaIdempotently()
@@ -622,6 +638,88 @@ void SqliteTaskRepositoryTest::replacePredecessorsRollsBackAtomically()
     QVERIFY(dependencyWriteThrows(repository, successor, {replacement, missing}));
     QCOMPARE(repository.findAllDependencies(),
              QList<TaskDependency>({TaskDependency{original, successor}}));
+}
+
+void SqliteTaskRepositoryTest::atomicallyCreatesTaskWithPredecessorsAcrossReopen()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    const QUuid first = QUuid::createUuid();
+    const QUuid second = QUuid::createUuid();
+    const Task successor = makeTask(
+        QUuid::createUuid(), QStringLiteral("原子创建的后继任务"));
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        repository.insert(makeTask(first, QStringLiteral("需求确认"),
+                                   TaskPriority::High, TaskStatus::Done));
+        repository.insert(makeTask(second, QStringLiteral("接口设计")));
+        repository.insertTaskWithPredecessors(successor, {second, first});
+
+        const auto stored = repository.findById(successor.id());
+        QVERIFY(stored.has_value());
+        compareTasks(*stored, successor);
+        const QList<TaskDependency> dependencies =
+            repository.findAllDependencies();
+        QCOMPARE(dependencies.size(), 2);
+        QVERIFY(dependencies.contains(TaskDependency{first, successor.id()}));
+        QVERIFY(dependencies.contains(TaskDependency{second, successor.id()}));
+    }
+
+    // 重开数据库验证事务提交结果确实落盘，而不是只存在于连接缓存中。
+    {
+        SqliteTaskRepository repository(databasePath);
+        QVERIFY(repository.findById(successor.id()).has_value());
+        const QList<TaskDependency> dependencies =
+            repository.findAllDependencies();
+        QCOMPARE(dependencies.size(), 2);
+        QVERIFY(dependencies.contains(TaskDependency{first, successor.id()}));
+        QVERIFY(dependencies.contains(TaskDependency{second, successor.id()}));
+    }
+}
+
+void SqliteTaskRepositoryTest::atomicCreationRollsBackTaskAfterMidwayEdgeFailure()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    SqliteTaskRepository repository(directory.filePath(QStringLiteral("tasks.db")));
+    const QUuid validPredecessor = QUuid::createUuid();
+    const QUuid missingPredecessor = QUuid::createUuid();
+    const Task successor = makeTask(
+        QUuid::createUuid(), QStringLiteral("不能留下半成品"));
+    repository.insert(makeTask(validPredecessor, QStringLiteral("有效前置")));
+
+    // 第一条边已可成功执行，第二条边触发外键失败；整个事务必须连同任务一起撤销。
+    QVERIFY(atomicCreationThrows(
+        repository, successor, {validPredecessor, missingPredecessor}));
+    QVERIFY(!repository.findById(successor.id()).has_value());
+    QVERIFY(repository.findById(validPredecessor).has_value());
+    QVERIFY(repository.findAllDependencies().isEmpty());
+}
+
+void SqliteTaskRepositoryTest::atomicCreationRollsBackOnTaskOrSelfDependencyConstraint()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    SqliteTaskRepository repository(directory.filePath(QStringLiteral("tasks.db")));
+    const Task existing = makeTask(
+        QUuid::createUuid(), QStringLiteral("已存在任务"));
+    repository.insert(existing);
+
+    const Task duplicateId = makeTask(
+        existing.id(), QStringLiteral("重复ID不能覆盖原任务"));
+    QVERIFY(atomicCreationThrows(repository, duplicateId, {}));
+    const auto unchanged = repository.findById(existing.id());
+    QVERIFY(unchanged.has_value());
+    compareTasks(*unchanged, existing);
+
+    const Task selfDependent = makeTask(
+        QUuid::createUuid(), QStringLiteral("自依赖必须回滚"));
+    QVERIFY(atomicCreationThrows(
+        repository, selfDependent, {selfDependent.id()}));
+    QVERIFY(!repository.findById(selfDependent.id()).has_value());
+    QVERIFY(repository.findAllDependencies().isEmpty());
 }
 
 QTEST_MAIN(SqliteTaskRepositoryTest)

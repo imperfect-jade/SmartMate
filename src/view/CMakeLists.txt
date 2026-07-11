@@ -28,6 +28,16 @@ set_source_files_properties(qml/TaskDependencyDialog.qml
         QT_RESOURCE_ALIAS TaskDependencyDialog.qml
 )
 
+set_source_files_properties(qml/DependencyGraphPage.qml
+    PROPERTIES
+        QT_RESOURCE_ALIAS DependencyGraphPage.qml
+)
+
+set_source_files_properties(qml/TaskCreationPredecessorDialog.qml
+    PROPERTIES
+        QT_RESOURCE_ALIAS TaskCreationPredecessorDialog.qml
+)
+
 qt_add_qml_module(smartmate_ui
     STATIC
     URI SmartMate.View
@@ -39,11 +49,14 @@ qt_add_qml_module(smartmate_ui
         qml/DateTimePickerDialog.qml
         qml/DurationPickerDialog.qml
         qml/TaskDependencyDialog.qml
+        qml/DependencyGraphPage.qml
+        qml/TaskCreationPredecessorDialog.qml
     IMPORTS
         TARGET smartmate_viewmodel
     DEPENDENCIES
         QtQuick
         QtQuick.Controls
+        QtQuick.Shapes
 )
 
 target_link_libraries(smartmate_ui

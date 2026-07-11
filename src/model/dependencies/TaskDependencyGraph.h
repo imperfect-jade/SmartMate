@@ -43,6 +43,12 @@ public:
     [[nodiscard]] TaskDependencyState dependencyState(const TaskId &taskId) const;
     [[nodiscard]] const QList<TaskDependency> &dependencies() const noexcept;
 
+    /// 返回每个节点的最长前置链层级；根节点为 0，非法图返回空映射。
+    [[nodiscard]] QHash<TaskId, int> dependencyLevels() const;
+    /// 将有向边视为无向连接，从一组种子求稳定闭包；悬空端点会被忽略。
+    [[nodiscard]] QList<TaskId> connectedTaskIds(
+        const QList<TaskId> &seedTaskIds) const;
+
     /// Done 以及“归档前为 Done”的任务均满足 Finish-to-Start 前置。
     [[nodiscard]] static bool satisfiesDependency(const Task &task) noexcept;
 

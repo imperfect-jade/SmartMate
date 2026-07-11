@@ -2,8 +2,10 @@
 
 #include "domain/Task.h"
 
+#include <QAbstractListModel>
 #include <QDateTime>
-#include <QObject>
+#include <QHash>
+#include <QSet>
 #include <QStringList>
 #include <QTimeZone>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -16,9 +18,11 @@ class TaskService;
 
 namespace smartmate::viewmodel {
 
-/// 编辑器维护与领域实体隔离的输入草稿。只有 save() 成功调用 Service 后才会
-/// 改变 Model，因此用户取消编辑不会污染已经保存的任务。
-class TaskEditorViewModel final : public QObject {
+/// 编辑器维护与领域实体隔离的输入草稿，并投影新建任务的前置候选。
+///
+/// 表单字段与候选勾选都只存在于 ViewModel；只有 save() 成功调用 Service 后
+/// 才会改变 Model，因此取消任一弹窗都不会污染已经保存的任务或依赖关系。
+class TaskEditorViewModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QString taskId READ taskId NOTIFY modeChanged)
     Q_PROPERTY(bool editMode READ editMode NOTIFY modeChanged)
@@ -47,15 +51,38 @@ class TaskEditorViewModel final : public QObject {
     Q_PROPERTY(bool canSave READ canSave NOTIFY formStateChanged)
     Q_PROPERTY(QString validationMessage READ validationMessage NOTIFY formStateChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
+    Q_PROPERTY(int predecessorCandidateCount READ predecessorCandidateCount
+                   NOTIFY predecessorCandidatesChanged)
+    Q_PROPERTY(int selectedPredecessorCount READ selectedPredecessorCount
+                   NOTIFY predecessorSelectionChanged)
+    Q_PROPERTY(QString predecessorSummaryText READ predecessorSummaryText
+                   NOTIFY predecessorSelectionChanged)
+    Q_PROPERTY(bool canConfigurePredecessors READ canConfigurePredecessors
+                   NOTIFY modeChanged)
     QML_NAMED_ELEMENT(TaskEditorViewModel)
     QML_UNCREATABLE("TaskEditorViewModel is owned by AppViewModel")
 
 public:
+    /// 候选行只用于展示；所有选择命令必须继续使用 candidateTaskId，而非行号。
+    enum Role {
+        CandidateTaskIdRole = Qt::UserRole + 1,
+        CandidateShortIdRole,
+        CandidateTitleRole,
+        CandidateStatusTextRole,
+        CandidatePriorityTextRole,
+        CandidateSelectedRole,
+    };
+    Q_ENUM(Role)
+
     explicit TaskEditorViewModel(model::TaskService &taskService, QObject *parent = nullptr);
     /// 注入时区供测试和确定性显示使用；生产环境默认使用系统时区。
     TaskEditorViewModel(model::TaskService &taskService,
                         QTimeZone timeZone,
                         QObject *parent = nullptr);
+
+    [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
+    [[nodiscard]] QVariant data(const QModelIndex &index, int role) const override;
+    [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
     [[nodiscard]] QString taskId() const;
     [[nodiscard]] bool editMode() const noexcept;
@@ -88,9 +115,13 @@ public:
     [[nodiscard]] bool canSave() const noexcept;
     [[nodiscard]] QString validationMessage() const;
     [[nodiscard]] QString errorMessage() const;
+    [[nodiscard]] int predecessorCandidateCount() const noexcept;
+    [[nodiscard]] int selectedPredecessorCount() const noexcept;
+    [[nodiscard]] QString predecessorSummaryText() const;
+    [[nodiscard]] bool canConfigurePredecessors() const noexcept;
 
-    /// 清空旧草稿并进入新建模式，不写入 Model。
-    Q_INVOKABLE void beginCreate();
+    /// 读取活动候选并进入新建模式；读取失败时保持原草稿并返回 false。
+    Q_INVOKABLE bool beginCreate();
     /// 根据稳定 TaskId 载入独立草稿；任务不存在或读取失败时返回 false。
     Q_INVOKABLE bool beginEdit(const QString &taskId);
     /// 以注入时区组合本地日期时间；DST 缺口、重叠或非法日期不会修改草稿。
@@ -100,6 +131,16 @@ public:
     /// 将天、小时、分钟换算为领域使用的总分钟；非法分量不会修改草稿。
     Q_INVOKABLE bool setEstimatedDuration(int days, int hours, int minutes);
     Q_INVOKABLE void clearEstimatedDuration();
+    /// 以当前已接受选择建立弹窗检查点，后续勾选仍只修改本地工作副本。
+    Q_INVOKABLE void beginPredecessorSelection();
+    /// 按稳定 TaskId 修改弹窗工作副本，不接受经过重排后不稳定的列表行号。
+    Q_INVOKABLE bool setCreationPredecessorSelected(const QString &taskId,
+                                                    bool selected);
+    /// 将弹窗工作副本合并进主创建草稿。
+    Q_INVOKABLE void acceptPredecessorSelection();
+    /// 放弃本次弹窗内勾选并恢复打开前的选择。
+    Q_INVOKABLE void cancelPredecessorSelection();
+    Q_INVOKABLE void clearCreationPredecessors();
     /// 将有效且已修改的草稿交给 Service；只有持久化成功才返回 true。
     Q_INVOKABLE bool save();
     /// 放弃保存当前草稿并通知 View 关闭编辑流程。
@@ -115,6 +156,8 @@ signals:
     void estimatedDurationChanged();
     void formStateChanged();
     void errorMessageChanged();
+    void predecessorCandidatesChanged();
+    void predecessorSelectionChanged();
     void saved(const QString &taskId);
     void cancelled();
 
@@ -127,17 +170,23 @@ private:
         int priorityIndex{1};
         std::optional<QDateTime> deadline;
         std::optional<int> estimatedMinutes;
+        QSet<model::TaskId> predecessorIds;
 
         bool operator==(const Snapshot &) const = default;
     };
 
     [[nodiscard]] Snapshot currentSnapshot() const;
     void replaceDraft(const Snapshot &draft, const QString &taskId, bool editMode);
+    void replaceCandidates(QList<model::Task> candidates);
+    void notifyCandidateSelectionChanged();
     void rememberCurrentDraft();
     void updateFormState();
     void setErrorMessage(const QString &message);
     [[nodiscard]] std::optional<model::TaskDraft> buildTaskDraft();
     [[nodiscard]] std::optional<QDateTime> displayedDeadline() const;
+    [[nodiscard]] int candidateRow(const model::TaskId &taskId) const;
+    [[nodiscard]] static QString statusText(model::TaskStatus status);
+    [[nodiscard]] static QString priorityText(model::TaskPriority priority);
 
     // 非拥有的应用服务引用。
     model::TaskService &m_taskService;
@@ -160,6 +209,13 @@ private:
     bool m_canSave{false};
     QString m_validationMessage;
     QString m_errorMessage;
+    /// 仅在新建模式加载的活动任务快照；Service 仍负责候选资格的最终校验。
+    QList<model::Task> m_predecessorCandidates;
+    /// 已由选择弹窗“确定”的前置集合，属于主创建草稿的一部分。
+    QSet<model::TaskId> m_selectedCreationPredecessors;
+    /// 弹窗内可撤销工作副本；“取消”不会改变主创建草稿。
+    QSet<model::TaskId> m_pickerPredecessors;
+    bool m_predecessorPickerActive{false};
 };
 
 } // namespace smartmate::viewmodel

@@ -230,6 +230,101 @@ const QList<TaskDependency> &TaskDependencyGraph::dependencies() const noexcept
     return m_dependencies;
 }
 
+QHash<TaskId, int> TaskDependencyGraph::dependencyLevels() const
+{
+    if (!validation().ok()) {
+        return {};
+    }
+
+    QHash<TaskId, int> levels;
+    QHash<TaskId, int> indegrees;
+    QHash<TaskId, QList<TaskId>> successorsByTask;
+    QList<TaskId> readyTaskIds;
+    for (const Task &task : m_tasks) {
+        levels.insert(task.id(), 0);
+        indegrees.insert(task.id(), 0);
+    }
+    for (const TaskDependency &dependency : m_dependencies) {
+        ++indegrees[dependency.successorId];
+        successorsByTask[dependency.predecessorId].append(dependency.successorId);
+    }
+    for (auto iterator = successorsByTask.begin(); iterator != successorsByTask.end();
+         ++iterator) {
+        normalizeIds(iterator.value());
+    }
+    for (const Task &task : m_tasks) {
+        if (indegrees.value(task.id()) == 0) {
+            readyTaskIds.append(task.id());
+        }
+    }
+    normalizeIds(readyTaskIds);
+
+    // Kahn 遍历保证只有在全部前置处理完毕后才确定层级，菱形图会选择最长路径。
+    qsizetype nextReadyIndex = 0;
+    qsizetype visitedCount = 0;
+    while (nextReadyIndex < readyTaskIds.size()) {
+        const TaskId taskId = readyTaskIds.at(nextReadyIndex++);
+        ++visitedCount;
+        for (const TaskId &successorId : successorsByTask.value(taskId)) {
+            levels[successorId] = std::max(levels.value(successorId),
+                                           levels.value(taskId) + 1);
+            const int remainingPredecessors = indegrees.value(successorId) - 1;
+            indegrees.insert(successorId, remainingPredecessors);
+            if (remainingPredecessors == 0) {
+                readyTaskIds.append(successorId);
+            }
+        }
+    }
+
+    // validation 已排除环；此防线避免未来调用路径在异常快照上返回半套层级。
+    return visitedCount == m_tasks.size() ? levels : QHash<TaskId, int>{};
+}
+
+QList<TaskId> TaskDependencyGraph::connectedTaskIds(
+    const QList<TaskId> &seedTaskIds) const
+{
+    QHash<TaskId, QList<TaskId>> neighborsByTask;
+    for (const TaskDependency &dependency : m_dependencies) {
+        if (!containsTask(dependency.predecessorId)
+            || !containsTask(dependency.successorId)) {
+            continue;
+        }
+        neighborsByTask[dependency.predecessorId].append(dependency.successorId);
+        neighborsByTask[dependency.successorId].append(dependency.predecessorId);
+    }
+    for (auto iterator = neighborsByTask.begin(); iterator != neighborsByTask.end();
+         ++iterator) {
+        normalizeIds(iterator.value());
+    }
+
+    QList<TaskId> pendingTaskIds;
+    for (const TaskId &taskId : seedTaskIds) {
+        if (containsTask(taskId)) {
+            pendingTaskIds.append(taskId);
+        }
+    }
+    normalizeIds(pendingTaskIds);
+
+    QSet<TaskId> visitedTaskIds;
+    qsizetype nextPendingIndex = 0;
+    while (nextPendingIndex < pendingTaskIds.size()) {
+        const TaskId taskId = pendingTaskIds.at(nextPendingIndex++);
+        if (visitedTaskIds.contains(taskId)) {
+            continue;
+        }
+        visitedTaskIds.insert(taskId);
+        for (const TaskId &neighborId : neighborsByTask.value(taskId)) {
+            if (!visitedTaskIds.contains(neighborId)) {
+                pendingTaskIds.append(neighborId);
+            }
+        }
+    }
+
+    QList<TaskId> connectedIds = visitedTaskIds.values();
+    normalizeIds(connectedIds);
+    return connectedIds;
+}
+
 bool TaskDependencyGraph::satisfiesDependency(const Task &task) noexcept
 {
     if (task.status() == TaskStatus::Done) {

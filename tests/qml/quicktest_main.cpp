@@ -20,7 +20,7 @@ public slots:
         m_repository = std::make_unique<smartmate::model::persistence::SqliteTaskRepository>(
             QStringLiteral(":memory:"));
         m_service = std::make_unique<smartmate::model::TaskService>(
-            *m_repository, *m_repository);
+            *m_repository, *m_repository, *m_repository);
         m_appViewModel =
             std::make_unique<smartmate::viewmodel::AppViewModel>(*m_service);
     }
@@ -31,6 +31,8 @@ public slots:
         QQmlEngine::setObjectOwnership(m_appViewModel->taskList(), QQmlEngine::CppOwnership);
         QQmlEngine::setObjectOwnership(m_appViewModel->taskEditor(), QQmlEngine::CppOwnership);
         QQmlEngine::setObjectOwnership(m_appViewModel->taskDependencies(),
+                                       QQmlEngine::CppOwnership);
+        QQmlEngine::setObjectOwnership(m_appViewModel->taskGraph(),
                                        QQmlEngine::CppOwnership);
         engine->rootContext()->setContextProperty(
             QStringLiteral("testAppViewModel"), m_appViewModel.get());

@@ -1,5 +1,6 @@
 #include "fakes/FakeTaskRepository.h"
 #include "fakes/FakeTaskDependencyRepository.h"
+#include "fakes/FakeTaskCreationRepository.h"
 
 #include "domain/Task.h"
 #include "domain/TaskConstraints.h"
@@ -10,16 +11,20 @@
 #include <QTest>
 #include <QTimeZone>
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
 using smartmate::model::Task;
+using smartmate::model::TaskCreationRequest;
 using smartmate::model::TaskDraft;
 using smartmate::model::TaskError;
+using smartmate::model::TaskId;
 using smartmate::model::TaskPriority;
 using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
 using smartmate::tests::FakeTaskDependencyRepository;
+using smartmate::tests::FakeTaskCreationRepository;
 using smartmate::tests::FakeTaskRepository;
 
 namespace {
@@ -72,6 +77,10 @@ class TaskServiceTest final : public QObject {
 private slots:
     void listsAndFindsTasks();
     void createsTaskWithEveryField();
+    void createsTaskAndPredecessorsAtomically();
+    void rejectsInvalidCreationPredecessorsWithoutWriting();
+    void rollsBackAtomicCreationFailureWithoutSignals();
+    void listsEligibleCreationPredecessors();
     void normalizesOmittedDescriptionToEmptyText();
     void validatesDraftWithoutRepositoryAccess();
     void validatesDraftFields();
@@ -89,6 +98,7 @@ private slots:
     void replacesDependenciesAndReportsStructuredErrors();
     void enforcesDependencyStatusConsistency();
     void mapsDependencyRepositoryFailures();
+    void buildsGraphSnapshotWithArchivedClosure();
 };
 
 void TaskServiceTest::listsAndFindsTasks()
@@ -99,7 +109,8 @@ void TaskServiceTest::listsAndFindsTasks()
                                    QStringLiteral("Build SmartMate"));
     FakeTaskRepository repository{{first, second}};
     FakeTaskDependencyRepository dependencyRepository;
-    const TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    const TaskService service{repository, dependencyRepository, creationRepository};
 
     const auto listResult = service.listTasks();
     QVERIFY(listResult.ok());
@@ -116,8 +127,10 @@ void TaskServiceTest::createsTaskWithEveryField()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
+    QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
     const QDateTime localDeadline =
         QDateTime::fromString(QStringLiteral("2027-02-03T14:30:00+08:00"), Qt::ISODate);
 
@@ -133,6 +146,7 @@ void TaskServiceTest::createsTaskWithEveryField()
 
     QVERIFY(result.ok());
     QCOMPARE(changedSpy.count(), 1);
+    QCOMPARE(dependencySpy.count(), 0);
     QCOMPARE(repository.tasks().size(), 1);
     const Task &created = *result.value;
     QVERIFY(!created.id().isNull());
@@ -149,11 +163,123 @@ void TaskServiceTest::createsTaskWithEveryField()
     QCOMPARE(repository.tasks().constFirst(), created);
 }
 
+void TaskServiceTest::createsTaskAndPredecessorsAtomically()
+{
+    const Task first = storedTask(TaskStatus::Done, std::nullopt,
+                                  QStringLiteral("Completed predecessor"));
+    const Task second = storedTask(TaskStatus::Todo, std::nullopt,
+                                   QStringLiteral("Pending predecessor"));
+    FakeTaskRepository repository{{first, second}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+    QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
+
+    const TaskCreationRequest request{
+        validDraft(),
+        {second.id(), first.id()}};
+    const auto result = service.createTask(request);
+
+    QVERIFY(result.ok());
+    QCOMPARE(creationRepository.insertCount(), 1);
+    QCOMPARE(repository.tasks().size(), 3);
+    QCOMPARE(taskSpy.count(), 1);
+    QCOMPARE(dependencySpy.count(), 1);
+    QCOMPARE(dependencyRepository.dependencies().size(), 2);
+    QVERIFY(dependencyRepository.dependencies().contains(
+        {first.id(), result.value->id()}));
+    QVERIFY(dependencyRepository.dependencies().contains(
+        {second.id(), result.value->id()}));
+}
+
+void TaskServiceTest::rejectsInvalidCreationPredecessorsWithoutWriting()
+{
+    const Task active = storedTask(TaskStatus::Todo);
+    const Task archived = storedTask(TaskStatus::Archived, TaskStatus::Done);
+    FakeTaskRepository repository{{active, archived}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+    QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
+
+    TaskCreationRequest request{validDraft(), {active.id(), active.id()}};
+    QCOMPARE(service.createTask(request).error, TaskError::DependencyDuplicate);
+
+    const TaskId missingId = QUuid::createUuid();
+    request.predecessorIds = {missingId};
+    const auto missing = service.createTask(request);
+    QCOMPARE(missing.error, TaskError::DependencyEndpointNotFound);
+    QCOMPARE(missing.context.conflictingTaskIds, QList<smartmate::model::TaskId>{missingId});
+
+    request.predecessorIds = {archived.id()};
+    QCOMPARE(service.createTask(request).error,
+             TaskError::DependencyPredecessorNotEligible);
+
+    request.predecessorIds = {active.id()};
+    request.task.status = TaskStatus::Done;
+    QCOMPARE(service.createTask(request).error,
+             TaskError::DependencyTargetNotEditable);
+
+    QCOMPARE(creationRepository.insertCount(), 0);
+    QCOMPARE(repository.tasks().size(), 2);
+    QVERIFY(dependencyRepository.dependencies().isEmpty());
+    QCOMPARE(taskSpy.count(), 0);
+    QCOMPARE(dependencySpy.count(), 0);
+}
+
+void TaskServiceTest::rollsBackAtomicCreationFailureWithoutSignals()
+{
+    const Task predecessor = storedTask(TaskStatus::Todo);
+    FakeTaskRepository repository{{predecessor}};
+    FakeTaskDependencyRepository dependencyRepository;
+    dependencyRepository.setWriteFailure(true);
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+    QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
+
+    const auto result = service.createTask(
+        TaskCreationRequest{validDraft(), {predecessor.id()}});
+
+    QCOMPARE(result.error, TaskError::PersistenceFailure);
+    QCOMPARE(repository.tasks(), QList<Task>{predecessor});
+    QVERIFY(dependencyRepository.dependencies().isEmpty());
+    QCOMPARE(creationRepository.insertCount(), 0);
+    QCOMPARE(taskSpy.count(), 0);
+    QCOMPARE(dependencySpy.count(), 0);
+}
+
+void TaskServiceTest::listsEligibleCreationPredecessors()
+{
+    const Task inProgress = storedTask(TaskStatus::InProgress);
+    const Task todo = storedTask(TaskStatus::Todo);
+    const Task done = storedTask(TaskStatus::Done);
+    const Task cancelled = storedTask(TaskStatus::Cancelled);
+    const Task archived = storedTask(TaskStatus::Archived, TaskStatus::Todo);
+    FakeTaskRepository repository{{archived, cancelled, todo, done, inProgress}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    const TaskService service{repository, dependencyRepository, creationRepository};
+
+    const auto result = service.listEligibleCreationPredecessors();
+
+    QVERIFY(result.ok());
+    QCOMPARE(result.value->size(), 4);
+    QCOMPARE(result.value->constFirst().id(), inProgress.id());
+    QVERIFY(std::none_of(result.value->cbegin(), result.value->cend(),
+                         [&archived](const Task &task) {
+        return task.id() == archived.id();
+    }));
+}
+
 void TaskServiceTest::normalizesOmittedDescriptionToEmptyText()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskDraft draft;
     draft.title = QStringLiteral("只填写标题");
     // 模拟旧调用方或未触碰描述输入框时传入的 null QString。
@@ -173,7 +299,8 @@ void TaskServiceTest::validatesDraftWithoutRepositoryAccess()
     repository.setReadFailure(true);
     repository.setWriteFailure(true);
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     TaskDraft draft = validDraft();
@@ -204,7 +331,8 @@ void TaskServiceTest::validatesDraftFields()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto expectError = [&service](TaskDraft draft, TaskError expected) {
@@ -253,7 +381,8 @@ void TaskServiceTest::acceptsDeadlineAndEstimateBoundaries()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    const TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    const TaskService service{repository, dependencyRepository, creationRepository};
     TaskDraft draft = validDraft();
 
     // 截止时间表达约束而不是输入格式约束，因此过去的有效时刻仍可保存。
@@ -288,7 +417,10 @@ void TaskServiceTest::acceptsEveryStatusAndPriority()
         for (const TaskPriority priority : priorities) {
             FakeTaskRepository repository;
             FakeTaskDependencyRepository dependencyRepository;
-            TaskService service{repository, dependencyRepository};
+            FakeTaskCreationRepository creationRepository{repository,
+                                                           dependencyRepository};
+            TaskService service{repository, dependencyRepository,
+                                creationRepository};
             TaskDraft draft = validDraft();
             draft.status = status;
             draft.priority = priority;
@@ -314,7 +446,8 @@ void TaskServiceTest::enforcesSingleInProgressTask()
     const Task todo = storedTask(TaskStatus::Todo);
     FakeTaskRepository repository{{active, todo}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     TaskDraft createDraft = validDraft();
@@ -338,7 +471,8 @@ void TaskServiceTest::mapsConcurrentInProgressCreateConflict()
     FakeTaskRepository repository;
     repository.setCompetingTaskOnNextWrite(storedTask(TaskStatus::InProgress));
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     TaskDraft draft = validDraft();
     draft.status = TaskStatus::InProgress;
@@ -357,7 +491,8 @@ void TaskServiceTest::mapsConcurrentInProgressUpdateConflict()
     FakeTaskRepository repository{{target}};
     repository.setCompetingTaskOnNextWrite(storedTask(TaskStatus::InProgress));
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     TaskDraft draft = validDraft();
     draft.status = TaskStatus::InProgress;
@@ -376,7 +511,8 @@ void TaskServiceTest::mapsConcurrentInProgressRestoreConflict()
     FakeTaskRepository repository{{archived}};
     repository.setCompetingTaskOnNextWrite(storedTask(TaskStatus::InProgress));
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto result = service.restoreTask(archived.id());
@@ -392,7 +528,8 @@ void TaskServiceTest::updatesTaskAndPreservesIdentity()
     const Task original = storedTask();
     FakeTaskRepository repository{{original}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     TaskDraft draft;
@@ -426,7 +563,8 @@ void TaskServiceTest::archivesAndRestoresOriginalStatus()
     const Task original = storedTask(TaskStatus::InProgress);
     FakeTaskRepository repository{{original}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto archiveResult = service.archiveTask(original.id());
@@ -448,7 +586,8 @@ void TaskServiceTest::rejectsRestoreWhenInProgressConflicts()
     const Task active = storedTask(TaskStatus::InProgress);
     FakeTaskRepository repository{{archived, active}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto result = service.restoreTask(archived.id());
@@ -465,7 +604,8 @@ void TaskServiceTest::reportsInvalidOperationsAndMissingTasks()
     const Task todo = storedTask();
     FakeTaskRepository repository{{todo}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     const QUuid missingId = QUuid::createUuid();
 
@@ -481,7 +621,8 @@ void TaskServiceTest::mapsRepositoryFailures()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     repository.setReadFailure(true);
@@ -510,7 +651,8 @@ void TaskServiceTest::replacesDependenciesAndReportsStructuredErrors()
                                       QStringLiteral("Completed"));
     FakeTaskRepository repository{{predecessor, target, archived, completed}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::dependenciesChanged};
 
     QVERIFY(service.listDependencies().ok());
@@ -574,7 +716,8 @@ void TaskServiceTest::replacesDependenciesAndReportsStructuredErrors()
     // 已存在的归档前置可以继续保留或移除，但不能作为新前置加入。
     FakeTaskDependencyRepository legacyDependencies{
         {{archived.id(), target.id()}}};
-    TaskService legacyService{repository, legacyDependencies};
+    FakeTaskCreationRepository legacyCreation{repository, legacyDependencies};
+    TaskService legacyService{repository, legacyDependencies, legacyCreation};
     QSignalSpy legacyChangedSpy{&legacyService, &TaskService::dependenciesChanged};
     const auto retainArchived = legacyService.replaceTaskPredecessors(
         target.id(), {archived.id(), predecessor.id()});
@@ -597,7 +740,8 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
     FakeTaskRepository repository{{predecessor, target}};
     FakeTaskDependencyRepository dependencyRepository{
         {{predecessor.id(), target.id()}}};
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
 
     const auto startBlocked = service.updateTask(
         target.id(), draftFor(target, TaskStatus::InProgress));
@@ -618,7 +762,10 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
     FakeTaskRepository activeRepository{{completedPredecessor, activeSuccessor}};
     FakeTaskDependencyRepository activeDependencies{
         {{completedPredecessor.id(), activeSuccessor.id()}}};
-    TaskService activeService{activeRepository, activeDependencies};
+    FakeTaskCreationRepository activeCreation{activeRepository,
+                                              activeDependencies};
+    TaskService activeService{activeRepository, activeDependencies,
+                              activeCreation};
 
     const auto invalidateActive = activeService.updateTask(
         completedPredecessor.id(),
@@ -638,8 +785,11 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
         {completedPredecessor, archivedCompletedSuccessor}};
     FakeTaskDependencyRepository archivedSuccessorDependencies{
         {{completedPredecessor.id(), archivedCompletedSuccessor.id()}}};
-    TaskService archivedSuccessorService{
+    FakeTaskCreationRepository archivedSuccessorCreation{
         archivedSuccessorRepository, archivedSuccessorDependencies};
+    TaskService archivedSuccessorService{
+        archivedSuccessorRepository, archivedSuccessorDependencies,
+        archivedSuccessorCreation};
     QCOMPARE(archivedSuccessorService.updateTask(
                  completedPredecessor.id(),
                  draftFor(completedPredecessor, TaskStatus::Cancelled)).error,
@@ -653,7 +803,8 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
     FakeTaskRepository readyRepository{{archivedCompletedPredecessor, readyTarget}};
     FakeTaskDependencyRepository readyDependencies{
         {{archivedCompletedPredecessor.id(), readyTarget.id()}}};
-    TaskService readyService{readyRepository, readyDependencies};
+    FakeTaskCreationRepository readyCreation{readyRepository, readyDependencies};
+    TaskService readyService{readyRepository, readyDependencies, readyCreation};
     QVERIFY(readyService.updateTask(
         readyTarget.id(), draftFor(readyTarget, TaskStatus::InProgress)).ok());
 
@@ -663,7 +814,10 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
     FakeTaskRepository restoreRepository{{predecessor, archivedActiveTarget}};
     FakeTaskDependencyRepository restoreDependencies{
         {{predecessor.id(), archivedActiveTarget.id()}}};
-    TaskService restoreService{restoreRepository, restoreDependencies};
+    FakeTaskCreationRepository restoreCreation{restoreRepository,
+                                               restoreDependencies};
+    TaskService restoreService{restoreRepository, restoreDependencies,
+                               restoreCreation};
     const auto restoreBlocked = restoreService.restoreTask(archivedActiveTarget.id());
     QCOMPARE(restoreBlocked.error, TaskError::TaskBlocked);
     QCOMPARE(restoreRepository.findById(archivedActiveTarget.id())->status(),
@@ -676,12 +830,14 @@ void TaskServiceTest::mapsDependencyRepositoryFailures()
     const Task target = storedTask(TaskStatus::Todo);
     FakeTaskRepository repository{{predecessor, target}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     QSignalSpy changedSpy{&service, &TaskService::dependenciesChanged};
 
     dependencyRepository.setReadFailure(true);
     QCOMPARE(service.listDependencies().error, TaskError::PersistenceFailure);
     QCOMPARE(service.listRecommendedTasks().error, TaskError::PersistenceFailure);
+    QCOMPARE(service.taskGraphSnapshot().error, TaskError::PersistenceFailure);
 
     dependencyRepository.setReadFailure(false);
     dependencyRepository.setWriteFailure(true);
@@ -690,6 +846,71 @@ void TaskServiceTest::mapsDependencyRepositoryFailures()
     QCOMPARE(writeFailure.error, TaskError::PersistenceFailure);
     QVERIFY(!writeFailure.detail.isEmpty());
     QCOMPARE(changedSpy.count(), 0);
+}
+
+void TaskServiceTest::buildsGraphSnapshotWithArchivedClosure()
+{
+    const Task archivedCompleted = storedTask(
+        TaskStatus::Archived, TaskStatus::Done,
+        QStringLiteral("Archived completed predecessor"));
+    const Task root = storedTask(TaskStatus::Todo, std::nullopt,
+                                 QStringLiteral("Active root"));
+    const Task connectedArchived = storedTask(
+        TaskStatus::Archived, TaskStatus::Todo,
+        QStringLiteral("Connected archived successor"));
+    const Task isolatedActive = storedTask(
+        TaskStatus::Cancelled, std::nullopt,
+        QStringLiteral("Isolated active task"));
+    const Task pureArchived = storedTask(
+        TaskStatus::Archived, TaskStatus::Todo,
+        QStringLiteral("Pure archived component"));
+    FakeTaskRepository repository{{pureArchived, connectedArchived, root,
+                                   isolatedActive, archivedCompleted}};
+    FakeTaskDependencyRepository dependencyRepository{
+        {{root.id(), connectedArchived.id()},
+         {archivedCompleted.id(), root.id()}}};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    const TaskService service{repository, dependencyRepository, creationRepository};
+
+    const auto result = service.taskGraphSnapshot();
+
+    QVERIFY(result.ok());
+    QCOMPARE(result.value->nodes.size(), 4);
+    QCOMPARE(result.value->edges.size(), 2);
+    const auto findNode = [&result](const smartmate::model::TaskId &taskId) {
+        return std::find_if(result.value->nodes.cbegin(), result.value->nodes.cend(),
+                            [&taskId](const smartmate::model::TaskGraphNode &node) {
+            return node.task.id() == taskId;
+        });
+    };
+    const auto archivedNode = findNode(archivedCompleted.id());
+    const auto rootNode = findNode(root.id());
+    const auto connectedNode = findNode(connectedArchived.id());
+    const auto isolatedNode = findNode(isolatedActive.id());
+    QVERIFY(archivedNode != result.value->nodes.cend());
+    QVERIFY(rootNode != result.value->nodes.cend());
+    QVERIFY(connectedNode != result.value->nodes.cend());
+    QVERIFY(isolatedNode != result.value->nodes.cend());
+    QVERIFY(findNode(pureArchived.id()) == result.value->nodes.cend());
+    QCOMPARE(archivedNode->dependencyLevel, 0);
+    QCOMPARE(rootNode->dependencyLevel, 1);
+    QCOMPARE(connectedNode->dependencyLevel, 2);
+    QCOMPARE(isolatedNode->dependencyLevel, 0);
+
+    const auto satisfiedEdge = std::find_if(
+        result.value->edges.cbegin(), result.value->edges.cend(),
+        [&archivedCompleted](const smartmate::model::TaskGraphEdge &edge) {
+            return edge.dependency.predecessorId == archivedCompleted.id();
+        });
+    const auto unsatisfiedEdge = std::find_if(
+        result.value->edges.cbegin(), result.value->edges.cend(),
+        [&root](const smartmate::model::TaskGraphEdge &edge) {
+            return edge.dependency.predecessorId == root.id();
+        });
+    QVERIFY(satisfiedEdge != result.value->edges.cend());
+    QVERIFY(unsatisfiedEdge != result.value->edges.cend());
+    QVERIFY(satisfiedEdge->satisfied);
+    QVERIFY(!unsatisfiedEdge->satisfied);
 }
 
 QTEST_APPLESS_MAIN(TaskServiceTest)

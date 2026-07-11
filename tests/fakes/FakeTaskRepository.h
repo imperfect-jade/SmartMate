@@ -78,6 +78,15 @@ public:
         return m_tasks;
     }
 
+    /// 仅供原子创建 Fake 在第二阶段失败时撤销尚未对外成功的测试写入。
+    void removeTaskForAtomicRollback(const model::TaskId &id)
+    {
+        const qsizetype index = findIndex(id);
+        if (index >= 0) {
+            m_tasks.removeAt(index);
+        }
+    }
+
 private:
     [[nodiscard]] qsizetype findIndex(const model::TaskId &id) const
     {

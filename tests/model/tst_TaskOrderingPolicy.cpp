@@ -1,5 +1,6 @@
 #include "fakes/FakeTaskRepository.h"
 #include "fakes/FakeTaskDependencyRepository.h"
+#include "fakes/FakeTaskCreationRepository.h"
 
 #include "dependencies/TaskDependencyGraph.h"
 #include "planner/TaskOrderingPolicy.h"
@@ -8,6 +9,7 @@
 #include <QTest>
 #include <QTimeZone>
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
@@ -23,6 +25,7 @@ using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
 using smartmate::model::orderTasks;
 using smartmate::tests::FakeTaskDependencyRepository;
+using smartmate::tests::FakeTaskCreationRepository;
 using smartmate::tests::FakeTaskRepository;
 
 namespace {
@@ -84,6 +87,7 @@ private slots:
     void graphReportsStableClosedCyclePath();
     void graphValidatesVeryLongChainWithoutRecursion();
     void graphComputesAndBlockingAndUnlockState();
+    void graphComputesStableLongestLevelsAndConnectedClosure();
     void plannerOrdersReadyBeforeTopologicalBlockedTasks();
     void plannerKeepsAllTasksWhenGivenInvalidCycle();
     void serviceReturnsPlanAndMapsRepositoryFailure();
@@ -327,6 +331,57 @@ void TaskOrderingPolicyTest::graphComputesAndBlockingAndUnlockState()
     QVERIFY(!terminalState.blocked);
 }
 
+void TaskOrderingPolicyTest::graphComputesStableLongestLevelsAndConnectedClosure()
+{
+    const QList<Task> tasks{
+        makeTask(1, TaskStatus::Todo),
+        makeTask(2, TaskStatus::Todo),
+        makeTask(3, TaskStatus::Todo),
+        makeTask(4, TaskStatus::Todo),
+        makeTask(5, TaskStatus::Todo),
+        makeTask(6, TaskStatus::Todo),
+        makeTask(7, TaskStatus::Todo),
+    };
+    const QList<TaskDependency> dependencies{
+        {taskId(2), taskId(4)},
+        {taskId(3), taskId(4)},
+        {taskId(2), taskId(3)},
+        {taskId(1), taskId(3)},
+        {taskId(5), taskId(6)},
+    };
+    const TaskDependencyGraph graph{tasks, dependencies};
+
+    QVERIFY(graph.validation().ok());
+    const QHash<TaskId, int> levels = graph.dependencyLevels();
+    QCOMPARE(levels.value(taskId(1)), 0);
+    QCOMPARE(levels.value(taskId(2)), 0);
+    QCOMPARE(levels.value(taskId(3)), 1);
+    // 2→4 是短边，但最长链 1/2→3→4 决定层级 2。
+    QCOMPARE(levels.value(taskId(4)), 2);
+    QCOMPARE(levels.value(taskId(5)), 0);
+    QCOMPARE(levels.value(taskId(6)), 1);
+    QCOMPARE(levels.value(taskId(7)), 0);
+    QCOMPARE(graph.connectedTaskIds({taskId(4)}),
+             QList<TaskId>({taskId(1), taskId(2), taskId(3), taskId(4)}));
+    QCOMPARE(graph.connectedTaskIds({taskId(7)}),
+             QList<TaskId>({taskId(7)}));
+
+    QList<Task> reversedTasks = tasks;
+    QList<TaskDependency> reversedDependencies = dependencies;
+    std::reverse(reversedTasks.begin(), reversedTasks.end());
+    std::reverse(reversedDependencies.begin(), reversedDependencies.end());
+    const TaskDependencyGraph reversedGraph{reversedTasks,
+                                            reversedDependencies};
+    QCOMPARE(reversedGraph.dependencyLevels(), levels);
+    QCOMPARE(reversedGraph.connectedTaskIds({taskId(4), taskId(1)}),
+             graph.connectedTaskIds({taskId(1), taskId(4)}));
+
+    const TaskDependencyGraph cyclicGraph{
+        {makeTask(1, TaskStatus::Todo), makeTask(2, TaskStatus::Todo)},
+        {{taskId(1), taskId(2)}, {taskId(2), taskId(1)}}};
+    QVERIFY(cyclicGraph.dependencyLevels().isEmpty());
+}
+
 void TaskOrderingPolicyTest::plannerOrdersReadyBeforeTopologicalBlockedTasks()
 {
     const QDateTime now = timestamp(10'000);
@@ -380,7 +435,8 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
         makeTask(10, TaskStatus::InProgress),
     }};
     FakeTaskDependencyRepository dependencyRepository;
-    const TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    const TaskService service{repository, dependencyRepository, creationRepository};
 
     const auto result = service.listRecommendedTasks();
     QVERIFY(result.ok());
@@ -395,11 +451,15 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
     FakeTaskDependencyRepository cyclicDependencies{
         {{taskId(10), taskId(20)},
          {taskId(20), taskId(10)}}};
-    const TaskService cyclicService{repository, cyclicDependencies};
+    FakeTaskCreationRepository cyclicCreation{repository, cyclicDependencies};
+    const TaskService cyclicService{repository, cyclicDependencies,
+                                    cyclicCreation};
     const auto cycle = cyclicService.listRecommendedTasks();
     QCOMPARE(cycle.error, TaskError::DependencyCycle);
     QCOMPARE(cycle.context.cyclePath.constFirst(),
              cycle.context.cyclePath.constLast());
+    QCOMPARE(cyclicService.taskGraphSnapshot().error,
+             TaskError::DependencyCycle);
 
     const Task unfinished = makeTask(30, TaskStatus::Todo);
     const Task completedSuccessor = makeTask(40, TaskStatus::Done);
@@ -419,10 +479,15 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
     FakeTaskDependencyRepository inconsistentDependencies{
         {{unfinished.id(), completedSuccessor.id()},
          {unfinished.id(), archivedActiveSuccessor.id()}}};
-    const TaskService inconsistentService{
+    FakeTaskCreationRepository inconsistentCreation{
         inconsistentRepository, inconsistentDependencies};
+    const TaskService inconsistentService{
+        inconsistentRepository, inconsistentDependencies,
+        inconsistentCreation};
     const auto inconsistentPlan = inconsistentService.listRecommendedTasks();
     QCOMPARE(inconsistentPlan.error, TaskError::DependencyStateConflict);
+    QCOMPARE(inconsistentService.taskGraphSnapshot().error,
+             TaskError::DependencyStateConflict);
     QCOMPARE(inconsistentPlan.context.blockingTaskIds,
              QList<TaskId>({unfinished.id()}));
     QCOMPARE(inconsistentPlan.context.conflictingTaskIds,

@@ -10,41 +10,10 @@ Page {
     id: root
 
     required property AppViewModel appViewModel
+    signal editDependenciesRequested(string taskId)
 
     background: Rectangle {
         color: "#f5f7fb"
-    }
-
-    // 顶部区域只转发“开始新建”命令，草稿初始化由 TaskEditorViewModel 完成。
-    header: ToolBar {
-        implicitHeight: 72
-        background: Rectangle {
-            color: "#ffffff"
-            border.color: "#e4e7ec"
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 28
-            anchors.rightMargin: 28
-
-            Label {
-                text: root.appViewModel.applicationName
-                color: "#172033"
-                font.pixelSize: 26
-                font.bold: true
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Button {
-                text: qsTr("新建任务")
-                onClicked: {
-                    root.appViewModel.taskEditor.beginCreate()
-                    editorDialog.open()
-                }
-            }
-        }
     }
 
     // 主体绑定活动/归档投影以及 ViewModel 已格式化的任务角色。
@@ -56,6 +25,21 @@ Page {
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
+
+            Button {
+                objectName: "newTaskButton"
+                text: qsTr("新建任务")
+                onClicked: {
+                    if (root.appViewModel.taskEditor.beginCreate()) {
+                        editorDialog.open()
+                    } else {
+                        errorDialog.message = root.appViewModel.taskEditor.errorMessage
+                        errorDialog.open()
+                    }
+                }
+            }
+
+            ToolSeparator { }
 
             Button {
                 text: qsTr("活动任务")
@@ -276,15 +260,7 @@ Page {
                                   ? qsTr("依赖 (%1)").arg(taskDelegate.predecessorCount)
                                   : qsTr("依赖")
                             visible: taskDelegate.canEditDependencies
-                            onClicked: {
-                                if (root.appViewModel.taskDependencies.beginEdit(
-                                            taskDelegate.taskId)) {
-                                    dependencyDialog.open()
-                                } else {
-                                    errorDialog.message = root.appViewModel.taskDependencies.errorMessage
-                                    errorDialog.open()
-                                }
-                            }
+                            onClicked: root.editDependenciesRequested(taskDelegate.taskId)
                         }
 
                         Button {
@@ -330,14 +306,6 @@ Page {
         editor: root.appViewModel.taskEditor
     }
 
-    // 依赖编辑使用独立草稿；保存前的多选不会改变任务图或列表排序。
-    TaskDependencyDialog {
-        id: dependencyDialog
-        objectName: "taskDependencyDialog"
-        anchors.centerIn: Overlay.overlay
-        editor: root.appViewModel.taskDependencies
-    }
-
     // 归档确认属于交互流程；真正的状态转换仍由 ViewModel 命令转交 Service。
     Dialog {
         id: archiveDialog
@@ -379,7 +347,6 @@ Page {
 
         onClosed: {
             root.appViewModel.taskList.clearError()
-            root.appViewModel.taskDependencies.clearError()
         }
     }
 

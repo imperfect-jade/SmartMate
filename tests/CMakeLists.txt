@@ -119,6 +119,43 @@ set_tests_properties(
         TIMEOUT 15
 )
 
+# 图页使用独立进程与内存数据库，避免节点夹具污染列表/选择器测试。
+qt_add_executable(tst_qml_dependency_graph
+    qml_graph/quicktest_main.cpp
+)
+
+target_compile_definitions(tst_qml_dependency_graph
+    PRIVATE
+        QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml_graph"
+)
+
+target_link_libraries(tst_qml_dependency_graph
+    PRIVATE
+        smartmate_persistence
+        smartmate_viewmodel
+        smartmate_viewmodelplugin
+        smartmate_ui
+        smartmate_uiplugin
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::QuickTest
+        Qt6::Sql
+)
+
+qt_import_qml_plugins(tst_qml_dependency_graph)
+
+add_test(
+    NAME view.qml_dependency_graph
+    COMMAND tst_qml_dependency_graph -platform offscreen
+)
+set_tests_properties(
+    view.qml_dependency_graph
+    PROPERTIES
+        ENVIRONMENT "QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic"
+        TIMEOUT 15
+)
+
 add_test(
     NAME view.qml_bootstrap
     COMMAND SmartMate --smoke-test -platform offscreen
@@ -140,6 +177,7 @@ set_tests_properties(
     viewmodel.task_viewmodels
     integration.task_creation_flow
     view.qml_pickers
+    view.qml_dependency_graph
     view.qml_bootstrap
     PROPERTIES
         ENVIRONMENT_MODIFICATION

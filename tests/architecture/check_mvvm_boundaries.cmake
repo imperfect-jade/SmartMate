@@ -149,6 +149,19 @@ foreach(qml_file IN LISTS qml_files)
         record_violation("${qml_file}"
             "View appears to contain dependency graph traversal or ordering logic")
     endif()
+    if(qml_lower MATCHES "(adjacency|breadth[ _-]*first|math\\.(atan2|sqrt|hypot))"
+       OR qml_lower MATCHES "(^|[^a-z])(dfs|bfs)([^a-z]|$)")
+        record_violation("${qml_file}"
+            "View appears to calculate graph traversal or arrow geometry")
+    endif()
+    get_filename_component(qml_name "${qml_file}" NAME)
+    string(TOLOWER "${qml_name}" qml_name_lower)
+    if(qml_name_lower MATCHES "dependency.*graph|graph.*dependency")
+        if(qml_lower MATCHES "(^|[^a-z])canvas[ 	\r\n{]")
+            record_violation("${qml_file}"
+                "Dependency graph must use declarative Shape paths, not Canvas algorithms")
+        endif()
+    endif()
 endforeach()
 
 # 项目明确采用 MVVM，因此额外禁止重新引入 Controller 层或类型。

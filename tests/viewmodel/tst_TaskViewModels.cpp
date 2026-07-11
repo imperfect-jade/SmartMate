@@ -1,14 +1,17 @@
 #include "AppViewModel.h"
 #include "TaskDependencyViewModel.h"
 #include "TaskEditorViewModel.h"
+#include "TaskGraphViewModel.h"
 #include "TaskListViewModel.h"
 #include "fakes/FakeTaskDependencyRepository.h"
+#include "fakes/FakeTaskCreationRepository.h"
 #include "fakes/FakeTaskRepository.h"
 
 #include "domain/Task.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
+#include <QRectF>
 #include <QSet>
 #include <QSignalSpy>
 #include <QTest>
@@ -25,10 +28,12 @@ using smartmate::model::TaskPriority;
 using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
 using smartmate::tests::FakeTaskRepository;
+using smartmate::tests::FakeTaskCreationRepository;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::viewmodel::AppViewModel;
 using smartmate::viewmodel::TaskDependencyViewModel;
 using smartmate::viewmodel::TaskEditorViewModel;
+using smartmate::viewmodel::TaskGraphViewModel;
 using smartmate::viewmodel::TaskListViewModel;
 
 namespace {
@@ -97,6 +102,30 @@ namespace {
     return -1;
 }
 
+[[nodiscard]] int roleForName(const QAbstractItemModel &model,
+                              const QByteArray &name)
+{
+    const auto names = model.roleNames();
+    for (auto iterator = names.cbegin(); iterator != names.cend(); ++iterator) {
+        if (iterator.value() == name) {
+            return iterator.key();
+        }
+    }
+    return -1;
+}
+
+[[nodiscard]] int graphRowForId(const TaskGraphViewModel &viewModel,
+                                const QString &taskId)
+{
+    for (int row = 0; row < viewModel.rowCount(); ++row) {
+        if (viewModel.data(viewModel.index(row), TaskGraphViewModel::TaskIdRole)
+                .toString() == taskId) {
+            return row;
+        }
+    }
+    return -1;
+}
+
 } // namespace
 
 // 测试链路使用 FakeRepository -> TaskService -> ViewModel，既覆盖可绑定状态，
@@ -130,19 +159,26 @@ private slots:
     void editorPreservesUnchangedDeadlinePrecision();
     void editorRejectsSaveWhenNothingChanged();
     void editorSuccessfullyUpdatesAStoredTask();
+    void editorCreationPredecessorPickerUsesIsolatedCheckpoints();
+    void editorAtomicCreationFailurePreservesTheWholeDraft();
+    // 图像素布局与箭头几何属于ViewModel，拓扑语义仍取自Model快照。
+    void graphProjectsNodesEdgesAndSelectionDetails();
+    void graphReloadPreservesVisibleSelectionAndClearsHiddenSelection();
 };
 
 void TaskViewModelsTest::appViewModelOwnsBindableChildren()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     AppViewModel app{service};
 
     QCOMPARE(app.applicationName(), QStringLiteral("SmartMate"));
     QVERIFY(app.taskList() != nullptr);
     QVERIFY(app.taskEditor() != nullptr);
     QVERIFY(app.taskDependencies() != nullptr);
+    QVERIFY(app.taskGraph() != nullptr);
 }
 
 void TaskViewModelsTest::listProjectsActiveAndArchivedTasksInPlanOrder()
@@ -163,7 +199,8 @@ void TaskViewModelsTest::listProjectsActiveAndArchivedTasksInPlanOrder()
                                1700000004000);
     FakeTaskRepository repository{{older, secondAtSameTime, archived, firstAtSameTime}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.count(), 3);
@@ -226,7 +263,8 @@ void TaskViewModelsTest::listMapsEveryRecommendedOrderReason()
     FakeTaskRepository repository{{archived, todo, upcoming, cancelled, high,
                                    overdue, completed, urgent, inProgress}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(reasonForId(viewModel, inProgress.id().toString(QUuid::WithoutBraces)),
@@ -271,7 +309,8 @@ void TaskViewModelsTest::listSearchesTrimmedKeywordsInTitleAndDescription()
         TaskPriority::Urgent);
     FakeTaskRepository repository{{noMatch, archivedMatch, descriptionMatch, titleMatch}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.setSearchText(QStringLiteral("  report  "));
@@ -315,7 +354,8 @@ void TaskViewModelsTest::listCombinesPrioritySearchAndArchiveFilters()
     FakeTaskRepository repository{{urgentOther, archivedUrgentReport,
                                    lowReport, urgentReport}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.priorityFilterOptions(),
@@ -348,7 +388,8 @@ void TaskViewModelsTest::listFilterPropertiesNotifyOnceAndRejectInvalidIndexes()
         TaskPriority::Urgent);
     FakeTaskRepository repository{{stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy searchSpy{&viewModel, &TaskListViewModel::searchTextChanged};
     QSignalSpy prioritySpy{&viewModel,
@@ -397,7 +438,8 @@ void TaskViewModelsTest::listRetainsFiltersAndStableTaskIdAcrossServiceReloads()
         TaskPriority::Urgent);
     FakeTaskRepository repository{{other, stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.setSearchText(QStringLiteral("needle"));
@@ -426,7 +468,8 @@ void TaskViewModelsTest::listSchedulesMinuteRefreshForTimeSensitiveReasons()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     const auto timers = viewModel.findChildren<QTimer *>(
@@ -444,7 +487,8 @@ void TaskViewModelsTest::listArchivesAndRestoresByStableTaskId()
                              1700000001000);
     FakeTaskRepository repository{{stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     QVERIFY(viewModel.archiveTask(idAt(viewModel, 0)));
@@ -465,7 +509,8 @@ void TaskViewModelsTest::listExposesAndClearsChineseErrors()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy errorSpy{&viewModel, &TaskListViewModel::errorOccurred};
 
@@ -495,7 +540,8 @@ void TaskViewModelsTest::listProjectsBlockingAndUnlockInformation()
     FakeTaskDependencyRepository dependencyRepository{{
         TaskDependency{predecessor.id(), successor.id()},
     }};
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskListViewModel viewModel{service};
 
     const int predecessorRow = rowForId(
@@ -554,7 +600,8 @@ void TaskViewModelsTest::dependencyDraftCancelDoesNotChangeModel()
     FakeTaskDependencyRepository dependencyRepository{{
         TaskDependency{selectedArchived.id(), target.id()},
     }};
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskDependencyViewModel editor{service};
 
     QVERIFY(editor.beginEdit(target.id().toString(QUuid::WithoutBraces)));
@@ -606,7 +653,8 @@ void TaskViewModelsTest::dependencyDraftSavesStableTaskIds()
         QStringLiteral("第二前置"), TaskStatus::Done, 1700000003000);
     FakeTaskRepository repository{{second, target, first}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskDependencyViewModel editor{service};
     QSignalSpy savedSpy{&editor, &TaskDependencyViewModel::saved};
 
@@ -652,7 +700,8 @@ void TaskViewModelsTest::dependencyDraftMapsCompleteCyclePath()
         TaskDependency{first.id(), second.id()},
         TaskDependency{second.id(), third.id()},
     }};
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskDependencyViewModel editor{service};
 
     QVERIFY(editor.beginEdit(first.id().toString(QUuid::WithoutBraces)));
@@ -673,7 +722,8 @@ void TaskViewModelsTest::editorCreatesACompleteTypedDraft()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     const QTimeZone timeZone = QTimeZone::fromSecondsAheadOfUtc(8 * 60 * 60);
     TaskEditorViewModel editor{service, timeZone};
 
@@ -726,7 +776,8 @@ void TaskViewModelsTest::editorCancelLeavesTheStoredTaskUnchanged()
                              1700000001000);
     FakeTaskRepository repository{{stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskEditorViewModel editor{service};
 
     QVERIFY(editor.beginEdit(stored.id().toString(QUuid::WithoutBraces)));
@@ -747,7 +798,8 @@ void TaskViewModelsTest::editorRejectsInvalidSelectionsAndMapsServiceErrors()
                              1700000001000);
     FakeTaskRepository repository{{active}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskEditorViewModel editor{service};
 
     editor.beginCreate();
@@ -779,7 +831,8 @@ void TaskViewModelsTest::editorSupportsDurationBoundariesAndClear()
 {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskEditorViewModel editor{service};
 
     editor.beginCreate();
@@ -821,7 +874,8 @@ void TaskViewModelsTest::editorConvertsInjectedTimeZoneAndRejectsDstTransitions(
 
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskEditorViewModel editor{service, newYork};
     editor.beginCreate();
     editor.setTitle(QStringLiteral("DST-safe deadline"));
@@ -860,7 +914,8 @@ void TaskViewModelsTest::editorPreservesUnchangedDeadlinePrecision()
                       utcTime(1700000001000)};
     FakeTaskRepository repository{{stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskEditorViewModel editor{service, QTimeZone{QTimeZone::UTC}};
 
     QVERIFY(editor.beginEdit(stored.id().toString(QUuid::WithoutBraces)));
@@ -883,7 +938,8 @@ void TaskViewModelsTest::editorRejectsSaveWhenNothingChanged()
                              1700000001000);
     FakeTaskRepository repository{{stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     TaskEditorViewModel editor{service};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     QSignalSpy savedSpy{&editor, &TaskEditorViewModel::saved};
@@ -906,7 +962,8 @@ void TaskViewModelsTest::editorSuccessfullyUpdatesAStoredTask()
                              1700000001000);
     FakeTaskRepository repository{{stored}};
     FakeTaskDependencyRepository dependencyRepository;
-    TaskService service{repository, dependencyRepository};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
     const QTimeZone timeZone = QTimeZone::fromSecondsAheadOfUtc(8 * 60 * 60);
     TaskEditorViewModel editor{service, timeZone};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
@@ -936,6 +993,216 @@ void TaskViewModelsTest::editorSuccessfullyUpdatesAStoredTask()
     QVERIFY(!editor.dirty());
     QVERIFY(!editor.canSave());
     QVERIFY(editor.errorMessage().isEmpty());
+}
+
+void TaskViewModelsTest::editorCreationPredecessorPickerUsesIsolatedCheckpoints()
+{
+    const Task active = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("需求确认"), TaskStatus::Todo, 1700000001000);
+    const Task archived = task(
+        QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
+        QStringLiteral("已归档候选"), TaskStatus::Archived, 1700000002000);
+    FakeTaskRepository repository{{archived, active}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    TaskEditorViewModel editor{service};
+
+    QVERIFY(editor.beginCreate());
+    QCOMPARE(editor.predecessorCandidateCount(), 1);
+    QCOMPARE(editor.data(editor.index(0), TaskEditorViewModel::CandidateTaskIdRole)
+                 .toString(),
+             active.id().toString(QUuid::WithoutBraces));
+    QVERIFY(editor.canConfigurePredecessors());
+
+    // 弹窗勾选只改变工作副本，清空后取消必须恢复打开前的主草稿选择。
+    editor.beginPredecessorSelection();
+    QVERIFY(editor.setCreationPredecessorSelected(
+        active.id().toString(QUuid::WithoutBraces), true));
+    QCOMPARE(editor.selectedPredecessorCount(), 1);
+    QVERIFY(editor.data(editor.index(0), TaskEditorViewModel::CandidateSelectedRole)
+                .toBool());
+    editor.clearCreationPredecessors();
+    QCOMPARE(editor.selectedPredecessorCount(), 0);
+    editor.cancelPredecessorSelection();
+    QCOMPARE(editor.selectedPredecessorCount(), 0);
+
+    editor.beginPredecessorSelection();
+    QVERIFY(editor.setCreationPredecessorSelected(
+        active.id().toString(QUuid::WithoutBraces), true));
+    editor.acceptPredecessorSelection();
+    QCOMPARE(editor.selectedPredecessorCount(), 1);
+    QCOMPARE(editor.predecessorSummaryText(), QStringLiteral("已选择 1 项"));
+    editor.setTitle(QStringLiteral("实现任务页面"));
+    QVERIFY(editor.canSave());
+
+    // ViewModel提供即时提示，但最终同一规则仍由TaskService权威校验。
+    editor.setStatusIndex(static_cast<int>(TaskStatus::Done));
+    QVERIFY(!editor.canSave());
+    QVERIFY(editor.validationMessage().contains(QStringLiteral("必须为待办")));
+    QCOMPARE(editor.selectedPredecessorCount(), 1);
+    editor.setStatusIndex(static_cast<int>(TaskStatus::Todo));
+    QVERIFY(editor.canSave());
+
+    editor.cancel();
+    QCOMPARE(editor.predecessorCandidateCount(), 0);
+    QCOMPARE(editor.selectedPredecessorCount(), 0);
+    QVERIFY(editor.title().isEmpty());
+    QVERIFY(!editor.dirty());
+}
+
+void TaskViewModelsTest::editorAtomicCreationFailurePreservesTheWholeDraft()
+{
+    const Task predecessor = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("接口设计"), TaskStatus::Todo, 1700000001000);
+    FakeTaskRepository repository{{predecessor}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    TaskEditorViewModel editor{service};
+    QSignalSpy savedSpy{&editor, &TaskEditorViewModel::saved};
+
+    QVERIFY(editor.beginCreate());
+    editor.setTitle(QStringLiteral("实现接口"));
+    editor.beginPredecessorSelection();
+    QVERIFY(editor.setCreationPredecessorSelected(
+        predecessor.id().toString(QUuid::WithoutBraces), true));
+    editor.acceptPredecessorSelection();
+    creationRepository.setWriteFailure(true);
+
+    QVERIFY(!editor.save());
+    QCOMPARE(repository.tasks().size(), 1);
+    QVERIFY(dependencyRepository.dependencies().isEmpty());
+    QCOMPARE(editor.title(), QStringLiteral("实现接口"));
+    QCOMPARE(editor.selectedPredecessorCount(), 1);
+    QVERIFY(editor.dirty());
+    QCOMPARE(savedSpy.count(), 0);
+
+    creationRepository.setWriteFailure(false);
+    QVERIFY(editor.save());
+    QCOMPARE(repository.tasks().size(), 2);
+    QCOMPARE(dependencyRepository.dependencies().size(), 1);
+    QCOMPARE(savedSpy.count(), 1);
+}
+
+void TaskViewModelsTest::graphProjectsNodesEdgesAndSelectionDetails()
+{
+    const Task predecessor = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("需求确认"), TaskStatus::Todo, 1700000001000);
+    const Task successor = task(
+        QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
+        QStringLiteral("接口实现"), TaskStatus::Todo, 1700000002000,
+        TaskPriority::High);
+    const Task isolated = task(
+        QStringLiteral("{33333333-3333-3333-3333-333333333333}"),
+        QStringLiteral("独立任务"), TaskStatus::Done, 1700000003000);
+    FakeTaskRepository repository{{isolated, successor, predecessor}};
+    FakeTaskDependencyRepository dependencyRepository{{
+        {predecessor.id(), successor.id()},
+    }};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    TaskGraphViewModel graph{service};
+
+    QCOMPARE(graph.rowCount(), 3);
+    QVERIFY(!graph.empty());
+    QVERIFY(graph.contentWidth() > 0.0);
+    QVERIFY(graph.contentHeight() > 0.0);
+    const int predecessorRow = graphRowForId(
+        graph, predecessor.id().toString(QUuid::WithoutBraces));
+    const int successorRow = graphRowForId(
+        graph, successor.id().toString(QUuid::WithoutBraces));
+    QVERIFY(predecessorRow >= 0);
+    QVERIFY(successorRow >= 0);
+
+    const qreal predecessorX = graph.data(
+        graph.index(predecessorRow), TaskGraphViewModel::NodeXRole).toReal();
+    const qreal successorX = graph.data(
+        graph.index(successorRow), TaskGraphViewModel::NodeXRole).toReal();
+    QVERIFY(successorX > predecessorX);
+    QCOMPARE(graph.data(graph.index(successorRow),
+                        TaskGraphViewModel::BlockedRole).toBool(), true);
+
+    // 层级投影后所有节点矩形都不得重叠，QML无需再次执行布局算法。
+    for (int first = 0; first < graph.rowCount(); ++first) {
+        const QRectF firstRect{
+            graph.data(graph.index(first), TaskGraphViewModel::NodeXRole).toReal(),
+            graph.data(graph.index(first), TaskGraphViewModel::NodeYRole).toReal(),
+            graph.data(graph.index(first), TaskGraphViewModel::NodeWidthRole).toReal(),
+            graph.data(graph.index(first), TaskGraphViewModel::NodeHeightRole).toReal(),
+        };
+        for (int second = first + 1; second < graph.rowCount(); ++second) {
+            const QRectF secondRect{
+                graph.data(graph.index(second), TaskGraphViewModel::NodeXRole).toReal(),
+                graph.data(graph.index(second), TaskGraphViewModel::NodeYRole).toReal(),
+                graph.data(graph.index(second), TaskGraphViewModel::NodeWidthRole).toReal(),
+                graph.data(graph.index(second), TaskGraphViewModel::NodeHeightRole).toReal(),
+            };
+            QVERIFY(!firstRect.intersects(secondRect));
+        }
+    }
+
+    QAbstractItemModel *edges = graph.edges();
+    QCOMPARE(edges->rowCount(), 1);
+    const int startXRole = roleForName(*edges, QByteArrayLiteral("startX"));
+    const int endXRole = roleForName(*edges, QByteArrayLiteral("endX"));
+    const int arrowTipXRole = roleForName(*edges, QByteArrayLiteral("arrowTipX"));
+    const int satisfiedRole = roleForName(*edges, QByteArrayLiteral("satisfied"));
+    const int highlightedRole = roleForName(*edges, QByteArrayLiteral("highlighted"));
+    QVERIFY(startXRole >= 0 && endXRole >= 0 && arrowTipXRole >= 0);
+    QVERIFY(edges->data(edges->index(0, 0), endXRole).toReal()
+            > edges->data(edges->index(0, 0), startXRole).toReal());
+    QCOMPARE(edges->data(edges->index(0, 0), arrowTipXRole),
+             edges->data(edges->index(0, 0), endXRole));
+    QVERIFY(!edges->data(edges->index(0, 0), satisfiedRole).toBool());
+
+    QVERIFY(graph.selectTask(successor.id().toString(QUuid::WithoutBraces)));
+    QCOMPARE(graph.selectedTaskTitle(), QStringLiteral("接口实现"));
+    QCOMPARE(graph.selectedStatusText(), QStringLiteral("待办"));
+    QCOMPARE(graph.selectedPriorityText(), QStringLiteral("高"));
+    QCOMPARE(graph.selectedPredecessorCount(), 1);
+    QCOMPARE(graph.selectedSuccessorCount(), 0);
+    QVERIFY(graph.canEditSelectedDependencies());
+    QVERIFY(graph.selectedBlockingReason().contains(QStringLiteral("需求确认")));
+    QVERIFY(edges->data(edges->index(0, 0), highlightedRole).toBool());
+}
+
+void TaskViewModelsTest::graphReloadPreservesVisibleSelectionAndClearsHiddenSelection()
+{
+    const Task predecessor = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("A"), TaskStatus::Todo, 1700000001000);
+    const Task successor = task(
+        QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
+        QStringLiteral("B"), TaskStatus::Todo, 1700000002000);
+    const Task isolated = task(
+        QStringLiteral("{33333333-3333-3333-3333-333333333333}"),
+        QStringLiteral("C"), TaskStatus::Done, 1700000003000);
+    FakeTaskRepository repository{{predecessor, successor, isolated}};
+    FakeTaskDependencyRepository dependencyRepository{{
+        {predecessor.id(), successor.id()},
+    }};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository};
+    TaskGraphViewModel graph{service};
+
+    const QString successorId = successor.id().toString(QUuid::WithoutBraces);
+    QVERIFY(graph.selectTask(successorId));
+    graph.reload();
+    QCOMPARE(graph.selectedTaskId(), successorId);
+
+    // 先归档前置时组件仍有活动后继，因此选中节点应继续可见。
+    QVERIFY(service.archiveTask(predecessor.id()).ok());
+    QCOMPARE(graph.selectedTaskId(), successorId);
+    // 两端都归档后成为纯归档组件，Model隐藏该组件且ViewModel清除过期选择。
+    QVERIFY(service.archiveTask(successor.id()).ok());
+    QVERIFY(graph.selectedTaskId().isEmpty());
+    QCOMPARE(graph.rowCount(), 1);
+    QCOMPARE(graph.data(graph.index(0), TaskGraphViewModel::TitleRole).toString(),
+             QStringLiteral("C"));
 }
 
 QTEST_GUILESS_MAIN(TaskViewModelsTest)
