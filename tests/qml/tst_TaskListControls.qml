@@ -100,6 +100,7 @@ TestCase {
     }
 
     function init() {
+        testAppViewModel.appearanceSettings.resetDefaults()
         testAppViewModel.taskList.showArchived = false
         testAppViewModel.taskList.clearFilters()
         compare(testAppViewModel.taskList.count, 3)
@@ -161,12 +162,156 @@ TestCase {
         verify(emptyState.text.indexOf("没有符合") >= 0)
     }
 
+    function test_navigationAndAppearanceSettings() {
+        const theme = findChild(subject, "appearanceTheme")
+        const tabs = findChild(subject, "mainNavigationTabs")
+        const focusNav = findChild(subject, "focusNavigationButton")
+        const statsNav = findChild(subject, "statisticsNavigationButton")
+        const settingsNav = findChild(subject, "settingsNavigationButton")
+        verify(theme !== null)
+        verify(tabs !== null)
+        verify(focusNav !== null)
+        verify(statsNav !== null)
+        verify(settingsNav !== null)
+        compare(focusNav.enabled, false)
+        compare(statsNav.enabled, false)
+
+        const greenBackground = theme.background.toString()
+        const greenNavigation = theme.navigation.toString()
+        const greenSurface = theme.surface.toString()
+        const greenBorder = theme.border.toString()
+        const greenInput = theme.inputBackground.toString()
+
+        mouseClick(settingsNav)
+        tryCompare(tabs, "currentIndex", 2)
+        const blueButton = findChild(subject, "accentThemeButton_1")
+        const largeButton = findChild(subject, "fontScaleButton_2")
+        verify(blueButton !== null)
+        verify(largeButton !== null)
+        mouseClick(blueButton)
+        mouseClick(largeButton)
+        tryCompare(testAppViewModel.appearanceSettings, "accentThemeIndex", 1)
+        tryCompare(testAppViewModel.appearanceSettings, "fontScaleIndex", 2)
+        verify(theme.background.toString() !== greenBackground)
+        verify(theme.navigation.toString() !== greenNavigation)
+        verify(theme.surface.toString() !== greenSurface)
+        verify(theme.border.toString() !== greenBorder)
+        verify(theme.inputBackground.toString() !== greenInput)
+        testAppViewModel.appearanceSettings.resetDefaults()
+        tabs.currentIndex = 0
+    }
+
+    function test_cardClickOpensReadOnlyDetails() {
+        tryVerify(function() { return taskDelegate(alphaId) !== null })
+        mouseClick(taskDelegate(alphaId), 80, 30)
+        const dialog = findChild(subject, "taskDetailsDialog")
+        verify(dialog !== null)
+        tryCompare(dialog, "opened", true)
+        compare(testAppViewModel.taskList.selectedTaskId, alphaId)
+        dialog.close()
+        tryCompare(testAppViewModel.taskList, "selectedTaskId", "")
+    }
+
+    function test_focusSlotAcceptsRealPointerDrag() {
+        const slot = findChild(subject, "focusTaskSlot")
+        const dropArea = findChild(subject, "focusTaskDropArea")
+        const preview = findChild(subject, "taskDragPreview")
+        verify(slot !== null)
+        verify(dropArea !== null)
+        verify(preview !== null)
+        compare(testAppViewModel.taskList.focusState, 1)
+        const focusId = testAppViewModel.taskList.focusTaskId
+        const handle = findChild(taskDelegate(focusId), "dragHandle_" + focusId)
+        verify(handle !== null)
+        tryCompare(handle, "visible", true)
+
+        const target = handle.mapFromItem(slot, slot.width / 2, slot.height / 2)
+        mousePress(handle, handle.width / 2, handle.height / 2, Qt.LeftButton)
+        mouseMove(handle, handle.width / 2 + 12, handle.height / 2, 20)
+        tryCompare(preview, "visible", true)
+        mouseMove(handle, target.x, target.y, 80)
+        tryCompare(dropArea, "containsDrag", true)
+        mouseRelease(handle, target.x, target.y, Qt.LeftButton)
+
+        tryCompare(testAppViewModel.taskList, "focusState", 2)
+        compare(testAppViewModel.taskList.focusTaskId, focusId)
+        verify(testAppViewModel.taskList.completeTask(focusId))
+        verify(testAppViewModel.taskList.redoTask(focusId))
+        tryCompare(testAppViewModel.taskList, "focusState", 1)
+    }
+
+    function test_blockedTaskDoesNotExposeDragHandle() {
+        saveSinglePredecessor(betaId, alphaId)
+        tryVerify(function() { return taskDelegate(betaId) !== null })
+        const handle = findChild(taskDelegate(betaId), "dragHandle_" + betaId)
+        verify(handle !== null)
+        tryCompare(handle, "visible", false)
+    }
+
+    function test_editorFitsMinimumWindowWithLargeFontAndLongText() {
+        const oldWidth = subject.width
+        const oldHeight = subject.height
+        subject.width = 900
+        subject.height = 620
+        testAppViewModel.appearanceSettings.fontScaleIndex = 2
+
+        const newTaskButton = findChild(subject, "newTaskButton")
+        mouseClick(newTaskButton)
+        const dialog = findChild(subject, "taskEditorDialog")
+        const scroll = findChild(subject, "taskEditorScrollView")
+        const content = findChild(subject, "taskEditorContent")
+        const titleField = findChild(subject, "taskTitleField")
+        const descriptionArea = findChild(subject, "taskDescriptionArea")
+        verify(dialog !== null)
+        verify(scroll !== null)
+        verify(content !== null)
+        verify(titleField !== null)
+        verify(descriptionArea !== null)
+        tryCompare(dialog, "opened", true)
+
+        testAppViewModel.taskEditor.title = "这是一个用于验证小窗口布局的很长任务标题，所有控件都不应越过弹窗边界"
+        testAppViewModel.taskEditor.description = "长描述用于验证文字自动换行。".repeat(20)
+        wait(50)
+        verify(dialog.width <= subject.width - 40)
+        verify(dialog.height <= subject.height - 40)
+        verify(content.width <= scroll.availableWidth + 1)
+        verify(titleField.width <= scroll.availableWidth + 1)
+        verify(descriptionArea.width <= scroll.availableWidth + 1)
+
+        dialog.openDeadlinePicker()
+        const deadline = findChild(subject, "deadlinePickerDialog")
+        tryCompare(deadline, "opened", true)
+        verify(deadline.width <= subject.width - 24)
+        verify(deadline.height <= subject.height - 24)
+        deadline.close()
+
+        dialog.openDurationPicker()
+        const duration = findChild(subject, "durationPickerDialog")
+        tryCompare(duration, "opened", true)
+        verify(duration.width <= subject.width - 24)
+        duration.close()
+
+        const predecessorButton = findChild(subject, "openCreationPredecessorButton")
+        predecessorButton.clicked()
+        const predecessor = findChild(subject, "taskCreationPredecessorDialog")
+        tryCompare(predecessor, "opened", true)
+        verify(predecessor.width <= subject.width - 24)
+        verify(predecessor.height <= subject.height - 24)
+        predecessor.close()
+
+        testAppViewModel.taskEditor.cancel()
+        dialog.close()
+        subject.width = oldWidth
+        subject.height = oldHeight
+        testAppViewModel.appearanceSettings.resetDefaults()
+    }
+
     function test_archivedTaskHidesEditEntryUntilRestored() {
         tryVerify(function() { return taskDelegate(alphaId) !== null })
         let editButton = findChild(taskDelegate(alphaId),
                                    "editTaskButton_" + alphaId)
         verify(editButton !== null)
-        tryCompare(editButton, "visible", true)
+        tryCompare(editButton, "enabled", true)
 
         // Todo 不能直接归档；先严格经过 Todo → InProgress → Done。
         verify(testAppViewModel.taskList.startTask(alphaId),
@@ -181,11 +326,12 @@ TestCase {
         editButton = findChild(taskDelegate(alphaId),
                                "editTaskButton_" + alphaId)
         const restoreButton = findChild(taskDelegate(alphaId),
-                                        "restoreTaskButton_" + alphaId)
+                                        "primaryTaskAction_" + alphaId)
         verify(editButton !== null)
         verify(restoreButton !== null)
-        tryCompare(editButton, "visible", false)
+        tryCompare(editButton, "enabled", false)
         tryCompare(restoreButton, "visible", true)
+        compare(restoreButton.text, "恢复")
 
         verify(testAppViewModel.taskList.restoreTask(alphaId),
                testAppViewModel.taskList.errorMessage)
@@ -195,7 +341,7 @@ TestCase {
         editButton = findChild(taskDelegate(alphaId),
                                "editTaskButton_" + alphaId)
         verify(editButton !== null)
-        tryCompare(editButton, "visible", true)
+        tryCompare(editButton, "enabled", true)
 
         // 恢复后的正常状态是 Done；重做回 Todo，避免污染后续依赖编辑用例。
         verify(testAppViewModel.taskList.redoTask(alphaId),
@@ -222,44 +368,41 @@ TestCase {
     function test_stateButtonsFollowProjectionAndCancellationRequiresConfirmation() {
         tryVerify(function() { return taskDelegate(gammaId) !== null })
         let delegate = taskDelegate(gammaId)
-        let startButton = findChild(delegate, "startTaskButton_" + gammaId)
+        let startButton = findChild(delegate, "primaryTaskAction_" + gammaId)
         let cancelButton = findChild(delegate, "cancelTaskButton_" + gammaId)
-        let completeButton = findChild(delegate, "completeTaskButton_" + gammaId)
-        let redoButton = findChild(delegate, "redoTaskButton_" + gammaId)
         let archiveButton = findChild(delegate, "archiveTaskButton_" + gammaId)
         verify(startButton !== null)
         verify(cancelButton !== null)
-        verify(completeButton !== null)
-        verify(redoButton !== null)
         verify(archiveButton !== null)
-        tryCompare(startButton, "visible", true)
-        tryCompare(cancelButton, "visible", true)
-        tryCompare(completeButton, "visible", false)
-        tryCompare(redoButton, "visible", false)
-        tryCompare(archiveButton, "visible", false)
+        compare(delegate.canStart, true)
+        compare(startButton.text, "开始")
+        tryCompare(cancelButton, "enabled", true)
+        tryCompare(archiveButton, "enabled", false)
 
-        mouseClick(startButton)
+        startButton.clicked()
         tryVerify(function() {
             return taskDelegate(gammaId) !== null
                    && taskDelegate(gammaId).statusText === "进行中"
         })
         delegate = taskDelegate(gammaId)
-        completeButton = findChild(delegate, "completeTaskButton_" + gammaId)
+        let completeButton = findChild(delegate, "primaryTaskAction_" + gammaId)
         cancelButton = findChild(delegate, "cancelTaskButton_" + gammaId)
         tryCompare(completeButton, "visible", true)
-        tryCompare(cancelButton, "visible", true)
+        compare(completeButton.text, "完成")
+        tryCompare(cancelButton, "enabled", true)
 
-        mouseClick(completeButton)
+        completeButton.clicked()
         tryVerify(function() {
             return taskDelegate(gammaId) !== null
                    && taskDelegate(gammaId).statusText === "已完成"
         })
         delegate = taskDelegate(gammaId)
-        redoButton = findChild(delegate, "redoTaskButton_" + gammaId)
+        let redoButton = findChild(delegate, "primaryTaskAction_" + gammaId)
         archiveButton = findChild(delegate, "archiveTaskButton_" + gammaId)
         tryCompare(redoButton, "visible", true)
-        tryCompare(archiveButton, "visible", true)
-        mouseClick(redoButton)
+        compare(redoButton.text, "重做")
+        tryCompare(archiveButton, "enabled", true)
+        redoButton.clicked()
         tryVerify(function() {
             return taskDelegate(gammaId) !== null
                    && taskDelegate(gammaId).statusText === "待办"
@@ -267,7 +410,7 @@ TestCase {
 
         delegate = taskDelegate(gammaId)
         cancelButton = findChild(delegate, "cancelTaskButton_" + gammaId)
-        mouseClick(cancelButton)
+        cancelButton.triggered()
         const cancelDialog = findChild(subject, "cancelTaskDialog")
         verify(cancelDialog !== null)
         tryCompare(cancelDialog, "opened", true)
@@ -277,7 +420,7 @@ TestCase {
 
         cancelButton = findChild(taskDelegate(gammaId),
                                  "cancelTaskButton_" + gammaId)
-        mouseClick(cancelButton)
+        cancelButton.triggered()
         tryCompare(cancelDialog, "opened", true)
         cancelDialog.accept()
         tryVerify(function() {
@@ -285,13 +428,14 @@ TestCase {
                    && taskDelegate(gammaId).statusText === "已取消"
         })
         delegate = taskDelegate(gammaId)
-        redoButton = findChild(delegate, "redoTaskButton_" + gammaId)
+        redoButton = findChild(delegate, "primaryTaskAction_" + gammaId)
         archiveButton = findChild(delegate, "archiveTaskButton_" + gammaId)
-        tryCompare(redoButton, "visible", true)
-        tryCompare(archiveButton, "visible", true)
+        verify(redoButton !== null)
+        compare(redoButton.text, "重做")
+        tryCompare(archiveButton, "enabled", true)
 
         // 返回 Todo，保证共享内存数据库中的后续用例仍可编辑依赖。
-        mouseClick(redoButton)
+        redoButton.clicked()
         tryVerify(function() {
             return taskDelegate(gammaId) !== null
                    && taskDelegate(gammaId).statusText === "待办"
@@ -310,7 +454,7 @@ TestCase {
         const editButton = findChild(alphaDelegate,
                                      "editDependenciesButton_" + alphaId)
         verify(editButton !== null)
-        mouseClick(editButton)
+        editButton.triggered()
         wait(0)
 
         const dialog = findChild(subject, "taskDependencyDialog")
@@ -352,7 +496,7 @@ TestCase {
         const editButton = findChild(taskDelegate(gammaId),
                                      "editDependenciesButton_" + gammaId)
         verify(editButton !== null)
-        mouseClick(editButton)
+        editButton.triggered()
         wait(0)
 
         const dialog = findChild(subject, "taskDependencyDialog")

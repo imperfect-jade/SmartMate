@@ -58,6 +58,8 @@ public slots:
                                        QQmlEngine::CppOwnership);
         QQmlEngine::setObjectOwnership(m_appViewModel->taskGraph(),
                                        QQmlEngine::CppOwnership);
+        QQmlEngine::setObjectOwnership(m_appViewModel->appearanceSettings(),
+                                       QQmlEngine::CppOwnership);
 
         engine->rootContext()->setContextProperty(
             QStringLiteral("graphTestAppViewModel"), m_appViewModel.get());

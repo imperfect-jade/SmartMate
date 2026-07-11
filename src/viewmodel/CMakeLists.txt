@@ -4,7 +4,9 @@ qt_add_qml_module(smartmate_viewmodel
     VERSION 1.0
     SOURCES
         AppViewModel.h
-        AppViewModel.cpp
+    AppViewModel.cpp
+    AppearanceSettingsViewModel.h
+    AppearanceSettingsViewModel.cpp
         TaskEditorViewModel.h
         TaskEditorViewModel.cpp
         TaskDependencyViewModel.h

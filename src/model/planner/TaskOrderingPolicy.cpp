@@ -243,7 +243,8 @@ QList<PlannedTask> orderTasks(const QList<Task> &tasks,
     for (const Task *task : orderedTasks) {
         plan.append(PlannedTask{*task,
                                 reasonFor(*task, nowUtc),
-                                graph.dependencyState(task->id())});
+                                graph.dependencyState(task->id()),
+                                {}});
     }
     return plan;
 }

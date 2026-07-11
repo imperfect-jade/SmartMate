@@ -11,13 +11,22 @@ Dialog {
     objectName: "taskCreationPredecessorDialog"
 
     required property TaskEditorViewModel editor
+    required property AppearanceTheme theme
 
-    width: 600
-    height: Math.min(560, parent ? parent.height - 40 : 560)
+    width: Math.max(root.theme.px(430),
+                    Math.min(root.theme.px(640), parent ? parent.width - root.theme.px(48) : root.theme.px(640)))
+    height: Math.max(root.theme.px(450),
+                     Math.min(root.theme.px(590), parent ? parent.height - root.theme.px(48) : root.theme.px(590)))
     modal: true
     focus: true
     closePolicy: Popup.NoAutoClose
     title: qsTr("选择新任务的前置任务")
+
+    background: Rectangle {
+        radius: 14
+        color: root.theme.surfaceElevated
+        border.color: root.theme.border
+    }
 
     contentItem: ColumnLayout {
         spacing: 12
@@ -25,7 +34,7 @@ Dialog {
         Label {
             Layout.fillWidth: true
             text: qsTr("所选任务必须全部完成，新任务才会自动解锁。任务与依赖将在保存时一次写入。")
-            color: "#475467"
+            color: root.theme.textSecondary
             wrapMode: Text.Wrap
         }
 
@@ -39,8 +48,8 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: 8
-            color: "#f9fafb"
-            border.color: "#d0d5dd"
+            color: root.theme.surfaceSubtle
+            border.color: root.theme.border
 
             ListView {
                 id: creationCandidateList
@@ -63,10 +72,10 @@ Dialog {
                     required property bool candidateSelected
 
                     width: ListView.view.width
-                    height: 52
+                    height: root.theme.px(64)
                     radius: 6
-                    color: candidateSelected ? "#eff8ff" : "#ffffff"
-                    border.color: candidateSelected ? "#84caff" : "#eaecf0"
+                    color: candidateSelected ? root.theme.primarySoft : root.theme.surfaceElevated
+                    border.color: candidateSelected ? root.theme.primary : root.theme.borderSoft
 
                     RowLayout {
                         anchors.fill: parent
@@ -90,24 +99,36 @@ Dialog {
                             Label {
                                 Layout.fillWidth: true
                                 text: candidateDelegate.candidateTitle
-                                color: "#172033"
+                                color: root.theme.textPrimary
                                 elide: Text.ElideRight
                             }
 
                             Label {
                                 Layout.fillWidth: true
                                 text: qsTr("ID %1").arg(candidateDelegate.candidateShortId)
-                                color: "#98a2b3"
+                                color: root.theme.textMuted
                                 font.pixelSize: 11
                             }
                         }
 
-                        Label {
-                            text: qsTr("%1优先级 · %2")
-                                  .arg(candidateDelegate.candidatePriorityText)
-                                  .arg(candidateDelegate.candidateStatusText)
-                            color: "#475467"
-                            font.pixelSize: 13
+                        ColumnLayout {
+                            Layout.maximumWidth: root.theme.px(150)
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("%1优先级").arg(candidateDelegate.candidatePriorityText)
+                                color: root.theme.textSecondary
+                                font.pixelSize: root.theme.px(12)
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: candidateDelegate.candidateStatusText
+                                color: root.theme.textMuted
+                                font.pixelSize: root.theme.px(11)
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }
@@ -119,14 +140,14 @@ Dialog {
                 anchors.centerIn: parent
                 visible: root.editor.predecessorCandidateCount === 0
                 text: qsTr("还没有可作为前置的活动任务")
-                color: "#667085"
+                color: root.theme.textMuted
             }
         }
     }
 
     footer: Rectangle {
         implicitHeight: 62
-        color: "#ffffff"
+        color: root.theme.surfaceStrong
 
         RowLayout {
             anchors.fill: parent

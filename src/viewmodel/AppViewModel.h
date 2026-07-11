@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TaskDependencyViewModel.h"
+#include "AppearanceSettingsViewModel.h"
 #include "TaskEditorViewModel.h"
 #include "TaskGraphViewModel.h"
 #include "TaskListViewModel.h"
@@ -11,6 +12,7 @@
 
 namespace smartmate::model {
 class TaskService;
+class AppearanceSettingsService;
 }
 
 namespace smartmate::viewmodel {
@@ -25,17 +27,23 @@ class AppViewModel : public QObject {
     Q_PROPERTY(smartmate::viewmodel::TaskDependencyViewModel *taskDependencies
                    READ taskDependencies CONSTANT)
     Q_PROPERTY(smartmate::viewmodel::TaskGraphViewModel *taskGraph READ taskGraph CONSTANT)
+    Q_PROPERTY(smartmate::viewmodel::AppearanceSettingsViewModel *appearanceSettings
+                   READ appearanceSettings CONSTANT)
     QML_NAMED_ELEMENT(AppViewModel)
     QML_UNCREATABLE("AppViewModel is created and owned by AppBootstrapper")
 
 public:
     explicit AppViewModel(model::TaskService &taskService, QObject *parent = nullptr);
+    AppViewModel(model::TaskService &taskService,
+                 model::AppearanceSettingsService &appearanceService,
+                 QObject *parent = nullptr);
 
     [[nodiscard]] QString applicationName() const;
     [[nodiscard]] TaskListViewModel *taskList() noexcept;
     [[nodiscard]] TaskEditorViewModel *taskEditor() noexcept;
     [[nodiscard]] TaskDependencyViewModel *taskDependencies() noexcept;
     [[nodiscard]] TaskGraphViewModel *taskGraph() noexcept;
+    [[nodiscard]] AppearanceSettingsViewModel *appearanceSettings() noexcept;
 
 private:
     // 四个子 ViewModel 共享同一个 TaskService，通过 Service 的状态变化保持同步，
@@ -45,6 +53,7 @@ private:
     /// 采用 QObject 子对象所有权，使 QML 只能观察且无需 app 层单独登记生命周期。
     TaskDependencyViewModel *m_taskDependencies;
     TaskGraphViewModel m_taskGraph;
+    AppearanceSettingsViewModel m_appearanceSettings;
 };
 
 } // namespace smartmate::viewmodel

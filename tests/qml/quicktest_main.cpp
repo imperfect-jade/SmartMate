@@ -34,6 +34,8 @@ public slots:
                                        QQmlEngine::CppOwnership);
         QQmlEngine::setObjectOwnership(m_appViewModel->taskGraph(),
                                        QQmlEngine::CppOwnership);
+        QQmlEngine::setObjectOwnership(m_appViewModel->appearanceSettings(),
+                                       QQmlEngine::CppOwnership);
         engine->rootContext()->setContextProperty(
             QStringLiteral("testAppViewModel"), m_appViewModel.get());
     }

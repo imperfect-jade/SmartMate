@@ -10,6 +10,11 @@ TestCase {
 
     property var subject: null
 
+    AppearanceTheme {
+        id: testTheme
+        settings: testAppViewModel.appearanceSettings
+    }
+
     SignalSpy {
         id: selectionSpy
         signalName: "selectionAccepted"
@@ -18,13 +23,13 @@ TestCase {
     Component {
         id: dateTimePickerComponent
 
-        DateTimePickerDialog { }
+        DateTimePickerDialog { theme: testTheme }
     }
 
     Component {
         id: durationPickerComponent
 
-        DurationPickerDialog { }
+        DurationPickerDialog { theme: testTheme }
     }
 
     function init() {

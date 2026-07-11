@@ -38,6 +38,13 @@ set_source_files_properties(qml/TaskCreationPredecessorDialog.qml
         QT_RESOURCE_ALIAS TaskCreationPredecessorDialog.qml
 )
 
+set_source_files_properties(qml/AppearanceTheme.qml
+    PROPERTIES QT_RESOURCE_ALIAS AppearanceTheme.qml)
+set_source_files_properties(qml/SettingsPage.qml
+    PROPERTIES QT_RESOURCE_ALIAS SettingsPage.qml)
+set_source_files_properties(qml/TaskDetailsDialog.qml
+    PROPERTIES QT_RESOURCE_ALIAS TaskDetailsDialog.qml)
+
 qt_add_qml_module(smartmate_ui
     STATIC
     URI SmartMate.View
@@ -51,6 +58,9 @@ qt_add_qml_module(smartmate_ui
         qml/TaskDependencyDialog.qml
         qml/DependencyGraphPage.qml
         qml/TaskCreationPredecessorDialog.qml
+        qml/AppearanceTheme.qml
+        qml/SettingsPage.qml
+        qml/TaskDetailsDialog.qml
     IMPORTS
         TARGET smartmate_viewmodel
     DEPENDENCIES

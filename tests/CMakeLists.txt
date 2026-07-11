@@ -95,6 +95,15 @@ add_test(
     COMMAND tst_sqlite_task_repository
 )
 
+qt_add_executable(tst_qsettings_appearance_repository
+    persistence/tst_QSettingsAppearanceRepository.cpp
+)
+target_link_libraries(tst_qsettings_appearance_repository
+    PRIVATE smartmate_persistence Qt6::Test
+)
+add_test(NAME persistence.appearance_settings
+         COMMAND tst_qsettings_appearance_repository)
+
 qt_add_executable(tst_task_viewmodels
     viewmodel/tst_TaskViewModels.cpp
     fakes/FakeTaskRepository.h
@@ -112,6 +121,14 @@ target_link_libraries(tst_task_viewmodels
 )
 
 add_test(NAME viewmodel.task_viewmodels COMMAND tst_task_viewmodels)
+
+qt_add_executable(tst_appearance_settings
+    viewmodel/tst_AppearanceSettings.cpp
+    fakes/FakeAppearanceSettingsRepository.h
+)
+target_include_directories(tst_appearance_settings PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_appearance_settings PRIVATE smartmate_viewmodel Qt6::Test)
+add_test(NAME viewmodel.appearance_settings COMMAND tst_appearance_settings)
 
 qt_add_executable(tst_task_creation_flow
     integration/tst_TaskCreationFlow.cpp
@@ -222,7 +239,9 @@ set_tests_properties(
     model.task_state_transitions
     model.task_ordering
     persistence.sqlite_task_repository
+    persistence.appearance_settings
     viewmodel.task_viewmodels
+    viewmodel.appearance_settings
     integration.task_creation_flow
     view.qml_pickers
     view.qml_dependency_graph

@@ -1,4 +1,6 @@
 add_library(smartmate_model STATIC
+    domain/AppearanceSettings.h
+    domain/AppearanceSettings.cpp
     domain/Task.h
     domain/Task.cpp
     domain/TaskConstraints.h
@@ -13,12 +15,15 @@ add_library(smartmate_model STATIC
     planner/TaskOrderingPolicy.h
     planner/TaskOrderingPolicy.cpp
     repositories/RepositoryException.h
+    repositories/IAppearanceSettingsRepository.h
     repositories/ITaskCreationRepository.h
     repositories/ITaskDependencyRepository.h
     repositories/ITaskRepository.h
     services/TaskService.h
     services/TaskService.cpp
     services/TaskResult.h
+    services/AppearanceSettingsService.h
+    services/AppearanceSettingsService.cpp
 )
 
 target_include_directories(smartmate_model

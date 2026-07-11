@@ -12,6 +12,7 @@ Page {
     objectName: "dependencyGraphPage"
 
     required property AppViewModel appViewModel
+    required property AppearanceTheme theme
     signal editDependenciesRequested(string taskId)
 
     readonly property TaskGraphViewModel graph: appViewModel.taskGraph
@@ -37,7 +38,7 @@ Page {
         graphViewport.contentY = 0
     }
 
-    background: Rectangle { color: "#f5f7fb" }
+    background: Rectangle { color: root.theme.background }
 
     ColumnLayout {
         anchors.fill: parent
@@ -50,7 +51,7 @@ Page {
 
             Label {
                 text: qsTr("Finish-to-Start 依赖图")
-                color: "#172033"
+                color: root.theme.textPrimary
                 font.pixelSize: 20
                 font.bold: true
             }
@@ -87,7 +88,7 @@ Page {
                 Layout.preferredWidth: 52
                 horizontalAlignment: Text.AlignHCenter
                 text: qsTr("%1%").arg(Math.round(graphViewport.zoomFactor * 100))
-                color: "#475467"
+                color: root.theme.textSecondary
             }
 
             Button {
@@ -102,7 +103,7 @@ Page {
             Layout.fillWidth: true
             visible: root.graph.errorMessage.length > 0
             text: root.graph.errorMessage
-            color: "#b42318"
+            color: root.theme.danger
             wrapMode: Text.Wrap
         }
 
@@ -116,8 +117,8 @@ Page {
                 Layout.fillHeight: true
                 Layout.minimumWidth: 480
                 radius: 12
-                color: "#ffffff"
-                border.color: "#d0d5dd"
+                color: root.theme.surface
+                border.color: root.theme.border
                 clip: true
 
                 Flickable {
@@ -176,10 +177,10 @@ Page {
                                 required property bool highlighted
 
                                 readonly property color edgeColor: cancelled
-                                                                   ? "#98a2b3"
+                                                                   ? root.theme.textDisabled
                                                                    : satisfied
-                                                                     ? "#12b76a"
-                                                                     : "#f79009"
+                                                                     ? root.theme.done
+                                                                     : root.theme.warning
 
                                 objectName: "graphEdge_" + predecessorId + "_" + successorId
                                 width: graphCanvas.width
@@ -256,12 +257,12 @@ Page {
                                 width: nodeWidth
                                 height: nodeHeight
                                 radius: 9
-                                color: archived ? "#f2f4f7" : "#ffffff"
+                                color: archived ? root.theme.surfaceStrong : root.theme.surfaceElevated
                                 border.width: selected ? 3 : 2
-                                border.color: selected ? "#2e90fa"
-                                                       : blocked ? "#f79009"
-                                                                 : archived ? "#98a2b3"
-                                                                            : "#84caff"
+                                border.color: selected ? root.theme.primary
+                                                       : blocked ? root.theme.warning
+                                                                 : archived ? root.theme.archived
+                                                                            : root.theme.borderStrong
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -271,7 +272,7 @@ Page {
                                     Label {
                                         Layout.fillWidth: true
                                         text: nodeDelegate.title
-                                        color: nodeDelegate.archived ? "#667085" : "#172033"
+                                        color: nodeDelegate.archived ? root.theme.textMuted : root.theme.textPrimary
                                         font.bold: true
                                         font.pixelSize: 15
                                         elide: Text.ElideRight
@@ -282,7 +283,7 @@ Page {
                                         text: qsTr("%1 · %2优先级")
                                               .arg(nodeDelegate.statusText)
                                               .arg(nodeDelegate.priorityText)
-                                        color: "#475467"
+                                        color: root.theme.textSecondary
                                         font.pixelSize: 12
                                         elide: Text.ElideRight
                                     }
@@ -292,7 +293,7 @@ Page {
                                         text: nodeDelegate.blocked
                                               ? qsTr("已阻塞 · ID %1").arg(nodeDelegate.shortId)
                                               : qsTr("ID %1").arg(nodeDelegate.shortId)
-                                        color: nodeDelegate.blocked ? "#b54708" : "#98a2b3"
+                                        color: nodeDelegate.blocked ? root.theme.warning : root.theme.textMuted
                                         font.pixelSize: 11
                                         elide: Text.ElideRight
                                     }
@@ -322,7 +323,7 @@ Page {
                     anchors.centerIn: parent
                     visible: root.graph.empty && root.graph.errorMessage.length === 0
                     text: qsTr("还没有可显示的活动任务")
-                    color: "#667085"
+                    color: root.theme.textMuted
                     font.pixelSize: 16
                 }
             }
@@ -332,8 +333,8 @@ Page {
                 Layout.preferredWidth: 300
                 Layout.fillHeight: true
                 radius: 12
-                color: "#ffffff"
-                border.color: "#d0d5dd"
+                color: root.theme.surface
+                border.color: root.theme.border
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -343,7 +344,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         text: qsTr("任务详情")
-                        color: "#172033"
+                        color: root.theme.textPrimary
                         font.pixelSize: 18
                         font.bold: true
                     }
@@ -352,7 +353,7 @@ Page {
                         Layout.fillWidth: true
                         visible: root.graph.selectedTaskId.length === 0
                         text: qsTr("选择一个节点查看直接前置、后续和阻塞信息。")
-                        color: "#667085"
+                        color: root.theme.textMuted
                         wrapMode: Text.Wrap
                     }
 
@@ -361,7 +362,7 @@ Page {
                         Layout.fillWidth: true
                         visible: root.graph.selectedTaskId.length > 0
                         text: root.graph.selectedTaskTitle
-                        color: "#172033"
+                        color: root.theme.textPrimary
                         font.pixelSize: 17
                         font.bold: true
                         wrapMode: Text.Wrap
@@ -373,7 +374,7 @@ Page {
                         text: qsTr("%1 · %2优先级")
                               .arg(root.graph.selectedStatusText)
                               .arg(root.graph.selectedPriorityText)
-                        color: "#475467"
+                        color: root.theme.textSecondary
                     }
 
                     Label {
@@ -383,7 +384,7 @@ Page {
                         text: qsTr("直接前置 %1 项\n直接后续 %2 项")
                               .arg(root.graph.selectedPredecessorCount)
                               .arg(root.graph.selectedSuccessorCount)
-                        color: "#475467"
+                        color: root.theme.textSecondary
                         lineHeight: 1.35
                     }
 
@@ -392,7 +393,7 @@ Page {
                         Layout.fillWidth: true
                         visible: root.graph.selectedBlockingReason.length > 0
                         text: qsTr("阻塞原因：%1").arg(root.graph.selectedBlockingReason)
-                        color: "#b54708"
+                        color: root.theme.warning
                         wrapMode: Text.Wrap
                     }
 

@@ -1,6 +1,8 @@
 add_library(smartmate_persistence STATIC
     SqliteTaskRepository.h
     SqliteTaskRepository.cpp
+    QSettingsAppearanceRepository.h
+    QSettingsAppearanceRepository.cpp
 )
 
 target_link_libraries(smartmate_persistence

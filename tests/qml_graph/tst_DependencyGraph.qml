@@ -78,7 +78,7 @@ TestCase {
     function test_tabExposesDirectedGraphPage() {
         const tabs = findChild(subject, "mainNavigationTabs")
         verify(tabs !== null)
-        compare(tabs.count, 2)
+        compare(tabs.count, 3)
 
         const page = showGraphPage()
         verify(page.visible)

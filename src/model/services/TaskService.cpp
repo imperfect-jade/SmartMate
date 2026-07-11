@@ -464,8 +464,48 @@ TaskPlanResult TaskService::listRecommendedTasks() const
                 QStringLiteral("Stored task dependencies violate an active/completed state."),
                 stateViolationContext(stateViolations));
         }
-        return TaskPlanResult::success(orderTasks(
-            tasks, dependencies, QDateTime::currentDateTimeUtc()));
+        QList<PlannedTask> plan = orderTasks(
+            tasks, dependencies, QDateTime::currentDateTimeUtc());
+        const bool hasInProgress = std::any_of(
+            tasks.cbegin(), tasks.cend(), [](const Task &task) {
+                return task.status() == TaskStatus::InProgress;
+            });
+        for (PlannedTask &planned : plan) {
+            const Task &task = planned.task;
+            auto &availability = planned.availability;
+            availability.canEditTask = task.canEditDetails();
+            availability.canEditDependencies = task.status() == TaskStatus::Todo;
+            availability.canStart = TaskStateMachine::canApply(
+                                            task, TaskTransition::Start)
+                && !planned.dependencyState.blocked && !hasInProgress;
+            availability.canCancel = TaskStateMachine::canApply(
+                task, TaskTransition::Cancel);
+            availability.canComplete = TaskStateMachine::canApply(
+                                               task, TaskTransition::Complete)
+                && !planned.dependencyState.blocked;
+            availability.canArchive = TaskStateMachine::canApply(
+                task, TaskTransition::Archive);
+
+            const auto canApplyWithoutDependencyConflict =
+                [&](const TaskTransition transition) {
+                    const auto target = TaskStateMachine::targetStatus(task, transition);
+                    if (!target.has_value()) {
+                        return false;
+                    }
+                    QList<Task> hypothetical = tasks;
+                    replaceTaskSnapshot(
+                        hypothetical,
+                        makeTaskWithStatus(task, *target, std::nullopt,
+                                           task.updatedAtUtc()));
+                    return !dependencyStateFailure(
+                        hypothetical, dependencies, task.id()).has_value();
+                };
+            availability.canRedo = canApplyWithoutDependencyConflict(
+                TaskTransition::Redo);
+            availability.canRestore = canApplyWithoutDependencyConflict(
+                TaskTransition::Restore);
+        }
+        return TaskPlanResult::success(std::move(plan));
     } catch (const RepositoryException &exception) {
         return persistencePlanFailure(exception);
     } catch (...) {

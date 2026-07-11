@@ -2,6 +2,8 @@
 
 #include "AppViewModel.h"
 #include "persistence/SqliteTaskRepository.h"
+#include "persistence/QSettingsAppearanceRepository.h"
+#include "services/AppearanceSettingsService.h"
 #include "services/TaskService.h"
 
 #include <QByteArray>
@@ -22,6 +24,10 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
     , m_taskService(
           std::make_unique<model::TaskService>(
               *m_taskRepository, *m_taskRepository, *m_taskRepository))
+    , m_appearanceRepository(
+          std::make_unique<model::persistence::QSettingsAppearanceRepository>())
+    , m_appearanceService(
+          std::make_unique<model::AppearanceSettingsService>(*m_appearanceRepository))
 {
     // 在创建界面前验证数据源可读，避免用一个已经失效的 Service 启动 ViewModel。
     const model::TaskListResult initialTasks = m_taskService->listTasks();
@@ -41,7 +47,8 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
                                      : detail.constData());
     }
 
-    m_appViewModel = std::make_unique<viewmodel::AppViewModel>(*m_taskService);
+    m_appViewModel = std::make_unique<viewmodel::AppViewModel>(
+        *m_taskService, *m_appearanceService);
 }
 
 AppBootstrapper::~AppBootstrapper() = default;
@@ -56,6 +63,8 @@ void AppBootstrapper::configure(QQmlApplicationEngine &engine)
     QQmlEngine::setObjectOwnership(m_appViewModel->taskDependencies(),
                                    QQmlEngine::CppOwnership);
     QQmlEngine::setObjectOwnership(m_appViewModel->taskGraph(),
+                                   QQmlEngine::CppOwnership);
+    QQmlEngine::setObjectOwnership(m_appViewModel->appearanceSettings(),
                                    QQmlEngine::CppOwnership);
 
     // 通过根组件的 required property 显式注入依赖，避免隐式全局状态。

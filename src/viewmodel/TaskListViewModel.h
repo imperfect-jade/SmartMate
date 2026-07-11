@@ -2,6 +2,7 @@
 
 #include "domain/Task.h"
 #include "domain/TaskStateMachine.h"
+#include "planner/TaskOrderingPolicy.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -27,10 +28,46 @@ class TaskListViewModel final : public QAbstractListModel {
     Q_PROPERTY(bool hasActiveFilters READ hasActiveFilters NOTIFY hasActiveFiltersChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
+    Q_PROPERTY(FocusState focusState READ focusState NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusTaskId READ focusTaskId NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusTitle READ focusTitle NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusDescription READ focusDescription NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusStatusText READ focusStatusText NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusPriorityText READ focusPriorityText NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusDeadlineText READ focusDeadlineText NOTIFY focusTaskChanged)
+    Q_PROPERTY(int focusEstimatedMinutes READ focusEstimatedMinutes NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusReasonText READ focusReasonText NOTIFY focusTaskChanged)
+    Q_PROPERTY(bool focusCanStart READ focusCanStart NOTIFY focusTaskChanged)
+    Q_PROPERTY(bool focusCanComplete READ focusCanComplete NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString selectedTaskId READ selectedTaskId NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedTitle READ selectedTitle NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedDescription READ selectedDescription NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedStatusText READ selectedStatusText NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedPriorityText READ selectedPriorityText NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedDeadlineText READ selectedDeadlineText NOTIFY selectionChanged)
+    Q_PROPERTY(int selectedEstimatedMinutes READ selectedEstimatedMinutes NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedCreatedAtText READ selectedCreatedAtText NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedUpdatedAtText READ selectedUpdatedAtText NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedReasonText READ selectedReasonText NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedBlockingReasonText READ selectedBlockingReasonText
+                   NOTIFY selectionChanged)
+    Q_PROPERTY(int selectedPredecessorCount READ selectedPredecessorCount NOTIFY selectionChanged)
+    Q_PROPERTY(int selectedUnlockCount READ selectedUnlockCount NOTIFY selectionChanged)
+    Q_PROPERTY(bool selectedCanEditTask READ selectedCanEditTask NOTIFY selectionChanged)
+    Q_PROPERTY(bool selectedCanEditDependencies READ selectedCanEditDependencies
+                   NOTIFY selectionChanged)
     QML_NAMED_ELEMENT(TaskListViewModel)
     QML_UNCREATABLE("TaskListViewModel is owned by AppViewModel")
 
 public:
+    enum class FocusState {
+        NoTasks = 0,
+        Suggested = 1,
+        InProgress = 2,
+        AllBlocked = 3,
+    };
+    Q_ENUM(FocusState)
+
     /// 行号会随筛选和排序变化，只有 taskId 是可用于编辑、归档和恢复的稳定身份。
     enum Role {
         TaskIdRole = Qt::UserRole + 1,
@@ -72,6 +109,32 @@ public:
     [[nodiscard]] QStringList priorityFilterOptions() const;
     [[nodiscard]] bool hasActiveFilters() const;
     [[nodiscard]] QString errorMessage() const;
+    [[nodiscard]] FocusState focusState() const noexcept;
+    [[nodiscard]] QString focusTaskId() const;
+    [[nodiscard]] QString focusTitle() const;
+    [[nodiscard]] QString focusDescription() const;
+    [[nodiscard]] QString focusStatusText() const;
+    [[nodiscard]] QString focusPriorityText() const;
+    [[nodiscard]] QString focusDeadlineText() const;
+    [[nodiscard]] int focusEstimatedMinutes() const noexcept;
+    [[nodiscard]] QString focusReasonText() const;
+    [[nodiscard]] bool focusCanStart() const noexcept;
+    [[nodiscard]] bool focusCanComplete() const noexcept;
+    [[nodiscard]] QString selectedTaskId() const;
+    [[nodiscard]] QString selectedTitle() const;
+    [[nodiscard]] QString selectedDescription() const;
+    [[nodiscard]] QString selectedStatusText() const;
+    [[nodiscard]] QString selectedPriorityText() const;
+    [[nodiscard]] QString selectedDeadlineText() const;
+    [[nodiscard]] int selectedEstimatedMinutes() const noexcept;
+    [[nodiscard]] QString selectedCreatedAtText() const;
+    [[nodiscard]] QString selectedUpdatedAtText() const;
+    [[nodiscard]] QString selectedReasonText() const;
+    [[nodiscard]] QString selectedBlockingReasonText() const;
+    [[nodiscard]] int selectedPredecessorCount() const noexcept;
+    [[nodiscard]] int selectedUnlockCount() const noexcept;
+    [[nodiscard]] bool selectedCanEditTask() const noexcept;
+    [[nodiscard]] bool selectedCanEditDependencies() const noexcept;
     void setShowArchived(bool showArchived);
     void setSearchText(const QString &searchText);
     void setPriorityFilterIndex(int priorityFilterIndex);
@@ -93,6 +156,8 @@ public:
     /// 按稳定TaskId请求恢复，并保留Service给出的业务约束。
     Q_INVOKABLE bool restoreTask(const QString &taskId);
     Q_INVOKABLE void clearError();
+    Q_INVOKABLE bool selectTask(const QString &taskId);
+    Q_INVOKABLE void clearSelection();
 
 signals:
     void showArchivedChanged();
@@ -102,6 +167,8 @@ signals:
     void countChanged();
     void errorMessageChanged();
     void errorOccurred(const QString &message);
+    void focusTaskChanged();
+    void selectionChanged();
 
 private:
     /// Model 依赖状态的界面投影；中文原因在 reload() 时一次生成，QML 不拼接图数据。
@@ -117,6 +184,12 @@ private:
     [[nodiscard]] static QString statusText(model::TaskStatus status);
     [[nodiscard]] static QString priorityText(model::TaskPriority priority);
     [[nodiscard]] static model::TaskId parseTaskId(const QString &taskId);
+    [[nodiscard]] const model::Task *taskForId(const model::TaskId &taskId) const;
+    [[nodiscard]] const model::Task *focusTask() const;
+    [[nodiscard]] const model::Task *selectedTask() const;
+    [[nodiscard]] const model::TaskCommandAvailability &availabilityFor(
+        const model::TaskId &taskId) const;
+    void rebuildFocusTask();
     bool performTransition(const QString &taskId, model::TaskTransition transition);
     void rebuildVisibleTasks();
     void setError(const QString &message);
@@ -130,6 +203,10 @@ private:
     QList<model::Task> m_visibleTasks;
     QHash<model::TaskId, QString> m_orderReasonTexts;
     QHash<model::TaskId, DependencyProjection> m_dependencyProjections;
+    QHash<model::TaskId, model::TaskCommandAvailability> m_availabilities;
+    model::TaskId m_focusTaskId;
+    FocusState m_focusState{FocusState::NoTasks};
+    model::TaskId m_selectedTaskId;
     bool m_showArchived{false};
     QString m_searchText;
     // 0表示全部，1～4分别映射Low～Urgent；非法索引不会替换当前条件。

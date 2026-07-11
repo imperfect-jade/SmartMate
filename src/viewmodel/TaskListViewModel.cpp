@@ -6,6 +6,7 @@
 
 #include <QDateTime>
 
+#include <algorithm>
 #include <utility>
 
 namespace smartmate::viewmodel {
@@ -15,6 +16,8 @@ constexpr auto deadlineFormat = "yyyy-MM-dd HH:mm";
 constexpr int allPrioritiesFilterIndex = 0;
 constexpr int firstPriorityFilterIndex = 1;
 constexpr int priorityFilterOptionCount = 5;
+constexpr auto detailDateTimeFormat = "yyyy-MM-dd HH:mm";
+const model::TaskCommandAvailability emptyAvailability{};
 
 [[nodiscard]] QString orderReasonText(const model::TaskOrderReason reason)
 {
@@ -140,21 +143,21 @@ QVariant TaskListViewModel::data(const QModelIndex &index, const int role) const
     case UnlockCountRole:
         return m_dependencyProjections.value(task.id()).unlockCount;
     case CanEditTaskRole:
-        return task.canEditDetails();
+        return availabilityFor(task.id()).canEditTask;
     case CanEditDependenciesRole:
-        return task.status() == model::TaskStatus::Todo;
+        return availabilityFor(task.id()).canEditDependencies;
     case CanStartRole:
-        return model::TaskStateMachine::canApply(task, model::TaskTransition::Start);
+        return availabilityFor(task.id()).canStart;
     case CanCancelRole:
-        return model::TaskStateMachine::canApply(task, model::TaskTransition::Cancel);
+        return availabilityFor(task.id()).canCancel;
     case CanCompleteRole:
-        return model::TaskStateMachine::canApply(task, model::TaskTransition::Complete);
+        return availabilityFor(task.id()).canComplete;
     case CanRedoRole:
-        return model::TaskStateMachine::canApply(task, model::TaskTransition::Redo);
+        return availabilityFor(task.id()).canRedo;
     case CanArchiveRole:
-        return model::TaskStateMachine::canApply(task, model::TaskTransition::Archive);
+        return availabilityFor(task.id()).canArchive;
     case CanRestoreRole:
-        return model::TaskStateMachine::canApply(task, model::TaskTransition::Restore);
+        return availabilityFor(task.id()).canRestore;
     default:
         return {};
     }
@@ -224,6 +227,166 @@ QString TaskListViewModel::errorMessage() const
     return m_errorMessage;
 }
 
+TaskListViewModel::FocusState TaskListViewModel::focusState() const noexcept
+{
+    return m_focusState;
+}
+
+QString TaskListViewModel::focusTaskId() const
+{
+    return m_focusTaskId.isNull()
+        ? QString{}
+        : m_focusTaskId.toString(QUuid::WithoutBraces);
+}
+
+QString TaskListViewModel::focusTitle() const
+{
+    const auto *task = focusTask();
+    return task != nullptr ? task->title() : QString{};
+}
+
+QString TaskListViewModel::focusDescription() const
+{
+    const auto *task = focusTask();
+    return task != nullptr ? task->description() : QString{};
+}
+
+QString TaskListViewModel::focusStatusText() const
+{
+    const auto *task = focusTask();
+    return task != nullptr ? statusText(task->status()) : QString{};
+}
+
+QString TaskListViewModel::focusPriorityText() const
+{
+    const auto *task = focusTask();
+    return task != nullptr ? priorityText(task->priority()) : QString{};
+}
+
+QString TaskListViewModel::focusDeadlineText() const
+{
+    const auto *task = focusTask();
+    return task != nullptr && task->deadline().has_value()
+        ? task->deadline()->toLocalTime().toString(QString::fromLatin1(deadlineFormat))
+        : QString{};
+}
+
+int TaskListViewModel::focusEstimatedMinutes() const noexcept
+{
+    const auto *task = focusTask();
+    return task != nullptr && task->estimatedMinutes().has_value()
+        ? *task->estimatedMinutes() : 0;
+}
+
+QString TaskListViewModel::focusReasonText() const
+{
+    return m_orderReasonTexts.value(m_focusTaskId);
+}
+
+bool TaskListViewModel::focusCanStart() const noexcept
+{
+    return availabilityFor(m_focusTaskId).canStart;
+}
+
+bool TaskListViewModel::focusCanComplete() const noexcept
+{
+    return availabilityFor(m_focusTaskId).canComplete;
+}
+
+QString TaskListViewModel::selectedTaskId() const
+{
+    return m_selectedTaskId.isNull()
+        ? QString{}
+        : m_selectedTaskId.toString(QUuid::WithoutBraces);
+}
+
+QString TaskListViewModel::selectedTitle() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr ? task->title() : QString{};
+}
+
+QString TaskListViewModel::selectedDescription() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr ? task->description() : QString{};
+}
+
+QString TaskListViewModel::selectedStatusText() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr ? statusText(task->status()) : QString{};
+}
+
+QString TaskListViewModel::selectedPriorityText() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr ? priorityText(task->priority()) : QString{};
+}
+
+QString TaskListViewModel::selectedDeadlineText() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr && task->deadline().has_value()
+        ? task->deadline()->toLocalTime().toString(QString::fromLatin1(deadlineFormat))
+        : QString{};
+}
+
+int TaskListViewModel::selectedEstimatedMinutes() const noexcept
+{
+    const auto *task = selectedTask();
+    return task != nullptr && task->estimatedMinutes().has_value()
+        ? *task->estimatedMinutes() : 0;
+}
+
+QString TaskListViewModel::selectedCreatedAtText() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr
+        ? task->createdAtUtc().toLocalTime().toString(
+              QString::fromLatin1(detailDateTimeFormat))
+        : QString{};
+}
+
+QString TaskListViewModel::selectedUpdatedAtText() const
+{
+    const auto *task = selectedTask();
+    return task != nullptr
+        ? task->updatedAtUtc().toLocalTime().toString(
+              QString::fromLatin1(detailDateTimeFormat))
+        : QString{};
+}
+
+QString TaskListViewModel::selectedReasonText() const
+{
+    return m_orderReasonTexts.value(m_selectedTaskId);
+}
+
+QString TaskListViewModel::selectedBlockingReasonText() const
+{
+    return m_dependencyProjections.value(m_selectedTaskId).blockingReasonText;
+}
+
+int TaskListViewModel::selectedPredecessorCount() const noexcept
+{
+    return m_dependencyProjections.value(m_selectedTaskId).predecessorCount;
+}
+
+int TaskListViewModel::selectedUnlockCount() const noexcept
+{
+    return m_dependencyProjections.value(m_selectedTaskId).unlockCount;
+}
+
+bool TaskListViewModel::selectedCanEditTask() const noexcept
+{
+    return availabilityFor(m_selectedTaskId).canEditTask;
+}
+
+bool TaskListViewModel::selectedCanEditDependencies() const noexcept
+{
+    return availabilityFor(m_selectedTaskId).canEditDependencies;
+}
+
 void TaskListViewModel::setShowArchived(const bool showArchived)
 {
     if (m_showArchived == showArchived) {
@@ -281,11 +444,13 @@ void TaskListViewModel::reload()
     QHash<model::TaskId, QString> taskTitles;
     QHash<QString, int> titleCounts;
     QHash<model::TaskId, DependencyProjection> dependencyProjections;
+    QHash<model::TaskId, model::TaskCommandAvailability> availabilities;
     allTasks.reserve(result.value->size());
     orderReasonTexts.reserve(result.value->size());
     taskTitles.reserve(result.value->size());
     titleCounts.reserve(result.value->size());
     dependencyProjections.reserve(result.value->size());
+    availabilities.reserve(result.value->size());
     for (const model::PlannedTask &plannedTask : *result.value) {
         taskTitles.insert(plannedTask.task.id(), plannedTask.task.title());
         ++titleCounts[plannedTask.task.title()];
@@ -307,17 +472,25 @@ void TaskListViewModel::reload()
                 static_cast<int>(state.predecessorIds.size()),
                 state.unlockCount,
             });
+        availabilities.insert(plannedTask.task.id(), plannedTask.availability);
     }
     // 分钟定时刷新若没有产生新顺序或理由，不重置QML模型，避免列表滚动位置跳动。
     if (m_allTasks == allTasks && m_orderReasonTexts == orderReasonTexts
-        && m_dependencyProjections == dependencyProjections) {
+        && m_dependencyProjections == dependencyProjections
+        && m_availabilities == availabilities) {
         return;
     }
 
     m_allTasks = std::move(allTasks);
     m_orderReasonTexts = std::move(orderReasonTexts);
     m_dependencyProjections = std::move(dependencyProjections);
+    m_availabilities = std::move(availabilities);
+    rebuildFocusTask();
+    if (!m_selectedTaskId.isNull() && selectedTask() == nullptr) {
+        m_selectedTaskId = model::TaskId{};
+    }
     rebuildVisibleTasks();
+    emit selectionChanged();
 }
 
 void TaskListViewModel::clearFilters()
@@ -378,6 +551,29 @@ bool TaskListViewModel::restoreTask(const QString &taskId)
 void TaskListViewModel::clearError()
 {
     setError({});
+}
+
+bool TaskListViewModel::selectTask(const QString &taskId)
+{
+    const model::TaskId id = parseTaskId(taskId);
+    if (id.isNull() || taskForId(id) == nullptr) {
+        return false;
+    }
+    if (m_selectedTaskId == id) {
+        return true;
+    }
+    m_selectedTaskId = id;
+    emit selectionChanged();
+    return true;
+}
+
+void TaskListViewModel::clearSelection()
+{
+    if (m_selectedTaskId.isNull()) {
+        return;
+    }
+    m_selectedTaskId = model::TaskId{};
+    emit selectionChanged();
 }
 
 bool TaskListViewModel::performTransition(const QString &taskId,
@@ -454,6 +650,71 @@ QString TaskListViewModel::priorityText(const model::TaskPriority priority)
 model::TaskId TaskListViewModel::parseTaskId(const QString &taskId)
 {
     return QUuid::fromString(taskId.trimmed());
+}
+
+const model::Task *TaskListViewModel::taskForId(
+    const model::TaskId &taskId) const
+{
+    if (taskId.isNull()) {
+        return nullptr;
+    }
+    const auto iterator = std::find_if(
+        m_allTasks.cbegin(), m_allTasks.cend(), [&taskId](const model::Task &task) {
+            return task.id() == taskId;
+        });
+    return iterator == m_allTasks.cend() ? nullptr : &*iterator;
+}
+
+const model::Task *TaskListViewModel::focusTask() const
+{
+    return taskForId(m_focusTaskId);
+}
+
+const model::Task *TaskListViewModel::selectedTask() const
+{
+    return taskForId(m_selectedTaskId);
+}
+
+const model::TaskCommandAvailability &TaskListViewModel::availabilityFor(
+    const model::TaskId &taskId) const
+{
+    const auto iterator = m_availabilities.constFind(taskId);
+    return iterator == m_availabilities.cend() ? emptyAvailability : iterator.value();
+}
+
+void TaskListViewModel::rebuildFocusTask()
+{
+    const FocusState oldState = m_focusState;
+    const model::TaskId oldId = m_focusTaskId;
+    m_focusTaskId = model::TaskId{};
+
+    bool hasTodo = false;
+    for (const model::Task &task : m_allTasks) {
+        if (task.status() == model::TaskStatus::InProgress) {
+            m_focusTaskId = task.id();
+            m_focusState = FocusState::InProgress;
+            break;
+        }
+        hasTodo = hasTodo || task.status() == model::TaskStatus::Todo;
+    }
+    if (m_focusTaskId.isNull()) {
+        for (const model::Task &task : m_allTasks) {
+            if (availabilityFor(task.id()).canStart) {
+                m_focusTaskId = task.id();
+                m_focusState = FocusState::Suggested;
+                break;
+            }
+        }
+    }
+    if (m_focusTaskId.isNull()) {
+        m_focusState = hasTodo ? FocusState::AllBlocked : FocusState::NoTasks;
+    }
+    if (oldState != m_focusState || oldId != m_focusTaskId) {
+        emit focusTaskChanged();
+    } else {
+        // 同一任务的标题、时间或推荐理由也可能变化。
+        emit focusTaskChanged();
+    }
 }
 
 void TaskListViewModel::rebuildVisibleTasks()

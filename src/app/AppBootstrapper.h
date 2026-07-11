@@ -7,9 +7,11 @@ class QString;
 
 namespace smartmate::model {
 class TaskService;
+class AppearanceSettingsService;
 
 namespace persistence {
 class SqliteTaskRepository;
+class QSettingsAppearanceRepository;
 }
 } // namespace smartmate::model
 
@@ -34,6 +36,9 @@ private:
     // 持有的引用在各自生命周期内始终指向仍然存活的对象。
     std::unique_ptr<model::persistence::SqliteTaskRepository> m_taskRepository;
     std::unique_ptr<model::TaskService> m_taskService;
+    std::unique_ptr<model::persistence::QSettingsAppearanceRepository>
+        m_appearanceRepository;
+    std::unique_ptr<model::AppearanceSettingsService> m_appearanceService;
     std::unique_ptr<viewmodel::AppViewModel> m_appViewModel;
 };
 

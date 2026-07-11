@@ -7,6 +7,7 @@ import QtQuick.Layouts
 // 时长使用受限数值控件生成候选值，避免将自由文本或格式解析带入 ViewModel。
 Dialog {
     id: root
+    required property AppearanceTheme theme
 
     // 边界由 ViewModel 投影，选择器只据此限制控件，不复制 Model 业务常量。
     property int minimumMinutes: 1
@@ -73,11 +74,18 @@ Dialog {
             pendingMinutes = allowedMinutes
     }
 
-    width: 430
+    width: Math.max(root.theme.px(420),
+                    Math.min(root.theme.px(520), parent ? parent.width - root.theme.px(48) : root.theme.px(520)))
     modal: true
     focus: true
     closePolicy: Popup.NoAutoClose
     title: qsTr("选择预计用时")
+
+    background: Rectangle {
+        radius: 14
+        color: root.theme.surfaceElevated
+        border.color: root.theme.border
+    }
 
     onAccepted: root.selectionAccepted(root.pendingDays,
                                        root.pendingHours,
@@ -89,13 +97,15 @@ Dialog {
         Label {
             Layout.fillWidth: true
             text: qsTr("使用按钮选择天、小时和分钟，最短为1分钟。")
-            color: "#667085"
+            color: root.theme.textSecondary
             wrapMode: Text.Wrap
         }
 
-        RowLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 10
+            columns: root.width < root.theme.px(470) ? 1 : 3
+            columnSpacing: 10
+            rowSpacing: 10
 
             ColumnLayout {
                 Layout.fillWidth: true
@@ -164,7 +174,7 @@ Dialog {
 
     footer: Rectangle {
         implicitHeight: 56
-        color: "#ffffff"
+        color: root.theme.surfaceStrong
 
         RowLayout {
             anchors.fill: parent

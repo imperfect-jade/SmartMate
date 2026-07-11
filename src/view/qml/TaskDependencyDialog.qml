@@ -10,13 +10,22 @@ Dialog {
     id: root
 
     required property TaskDependencyViewModel editor
+    required property AppearanceTheme theme
 
-    width: 600
-    height: Math.min(560, parent ? parent.height - 40 : 560)
+    width: Math.max(root.theme.px(430),
+                    Math.min(root.theme.px(640), parent ? parent.width - root.theme.px(48) : root.theme.px(640)))
+    height: Math.max(root.theme.px(450),
+                     Math.min(root.theme.px(590), parent ? parent.height - root.theme.px(48) : root.theme.px(590)))
     modal: true
     focus: true
     closePolicy: Popup.NoAutoClose
     title: qsTr("管理前置任务")
+
+    background: Rectangle {
+        radius: 14
+        color: root.theme.surfaceElevated
+        border.color: root.theme.border
+    }
 
     contentItem: ColumnLayout {
         spacing: 12
@@ -25,7 +34,7 @@ Dialog {
             Layout.fillWidth: true
             text: qsTr("为“%1”选择必须先完成的任务。所有前置任务完成后，当前任务才可开始。")
                   .arg(root.editor.taskTitle)
-            color: "#475467"
+            color: root.theme.textSecondary
             wrapMode: Text.Wrap
         }
 
@@ -39,8 +48,8 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: 8
-            color: "#f9fafb"
-            border.color: "#d0d5dd"
+            color: root.theme.surfaceSubtle
+            border.color: root.theme.border
 
             ListView {
                 id: dependencyCandidateList
@@ -65,10 +74,10 @@ Dialog {
                     required property bool selectable
 
                     width: ListView.view.width
-                    height: 48
+                    height: root.theme.px(64)
                     radius: 6
-                    color: candidateDelegate.selected ? "#eff8ff" : "#ffffff"
-                    border.color: candidateDelegate.selected ? "#84caff" : "#eaecf0"
+                    color: candidateDelegate.selected ? root.theme.primarySoft : root.theme.surfaceElevated
+                    border.color: candidateDelegate.selected ? root.theme.primary : root.theme.borderSoft
 
                     RowLayout {
                         anchors.fill: parent
@@ -92,24 +101,36 @@ Dialog {
                             Label {
                                 Layout.fillWidth: true
                                 text: candidateDelegate.title
-                                color: candidateDelegate.selectable ? "#172033" : "#98a2b3"
+                                color: candidateDelegate.selectable ? root.theme.textPrimary : root.theme.textDisabled
                                 elide: Text.ElideRight
                             }
 
                             Label {
                                 Layout.fillWidth: true
                                 text: qsTr("ID %1").arg(candidateDelegate.shortId)
-                                color: "#98a2b3"
+                                color: root.theme.textMuted
                                 font.pixelSize: 11
                             }
                         }
 
-                        Label {
-                            text: qsTr("%1优先级 · %2")
-                                  .arg(candidateDelegate.priorityText)
-                                  .arg(candidateDelegate.statusText)
-                            color: candidateDelegate.archived ? "#98a2b3" : "#475467"
-                            font.pixelSize: 13
+                        ColumnLayout {
+                            Layout.maximumWidth: root.theme.px(150)
+                            Label {
+                                Layout.fillWidth: true
+                                text: qsTr("%1优先级").arg(candidateDelegate.priorityText)
+                                color: candidateDelegate.archived ? root.theme.textDisabled : root.theme.textSecondary
+                                font.pixelSize: root.theme.px(12)
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: candidateDelegate.statusText
+                                color: candidateDelegate.archived ? root.theme.textDisabled : root.theme.textMuted
+                                font.pixelSize: root.theme.px(11)
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }
@@ -121,7 +142,7 @@ Dialog {
                 anchors.centerIn: parent
                 visible: root.editor.count === 0
                 text: qsTr("没有可选择的前置任务")
-                color: "#667085"
+                color: root.theme.textMuted
             }
         }
 
@@ -130,14 +151,14 @@ Dialog {
             Layout.fillWidth: true
             visible: text.length > 0
             text: root.editor.errorMessage
-            color: "#b42318"
+            color: root.theme.danger
             wrapMode: Text.Wrap
         }
     }
 
     footer: Rectangle {
         implicitHeight: 62
-        color: "#ffffff"
+        color: root.theme.surfaceStrong
 
         RowLayout {
             anchors.fill: parent

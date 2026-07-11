@@ -7,6 +7,7 @@ import QtQuick.Layouts
 // 日期时间候选值完全属于 View；取消弹窗不会向 ViewModel 发送任何命令。
 Dialog {
     id: root
+    required property AppearanceTheme theme
 
     property int pendingYear: 2000
     property int pendingMonth: 1
@@ -46,11 +47,20 @@ Dialog {
         root.visibleMonth = root.pendingMonth
     }
 
-    width: 500
+    width: Math.max(root.theme.px(440),
+                    Math.min(root.theme.px(540), parent ? parent.width - root.theme.px(48) : root.theme.px(540)))
+    height: Math.max(root.theme.px(500),
+                     Math.min(root.theme.px(650), parent ? parent.height - root.theme.px(48) : root.theme.px(650)))
     modal: true
     focus: true
     closePolicy: Popup.NoAutoClose
     title: qsTr("选择截止时间")
+
+    background: Rectangle {
+        radius: 14
+        color: root.theme.surfaceElevated
+        border.color: root.theme.border
+    }
 
     onAccepted: root.selectionAccepted(root.pendingYear,
                                        root.pendingMonth,
@@ -58,8 +68,15 @@ Dialog {
                                        root.pendingHour,
                                        root.pendingMinute)
 
-    contentItem: ColumnLayout {
-        spacing: 10
+    contentItem: ScrollView {
+        id: pickerScroll
+        contentWidth: availableWidth
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        clip: true
+
+        ColumnLayout {
+        width: pickerScroll.availableWidth
+        spacing: root.theme.px(10)
 
         RowLayout {
             Layout.fillWidth: true
@@ -76,6 +93,7 @@ Dialog {
                 text: qsTr("%1年%2月").arg(root.visibleYear).arg(root.visibleMonth)
                 font.bold: true
                 font.pixelSize: 17
+                color: root.theme.textPrimary
             }
 
             Button {
@@ -109,19 +127,19 @@ Dialog {
 
                 required property var model
 
-                implicitWidth: 56
-                implicitHeight: 38
+                implicitWidth: root.theme.px(56)
+                implicitHeight: root.theme.px(38)
                 radius: 5
                 opacity: dayCell.model.month === calendarGrid.month ? 1 : 0
                 color: root.pendingYear === calendarGrid.year
                        && root.pendingMonth === calendarGrid.month + 1
                        && root.pendingDay === dayCell.model.day
-                       ? "#dbeafe" : "transparent"
+                       ? root.theme.primarySoft : "transparent"
 
                 Label {
                     anchors.centerIn: parent
                     text: dayCell.model.day
-                    color: "#172033"
+                    color: root.theme.textPrimary
                 }
             }
 
@@ -210,11 +228,12 @@ Dialog {
                 font.bold: true
             }
         }
+        }
     }
 
     footer: Rectangle {
         implicitHeight: 56
-        color: "#ffffff"
+        color: root.theme.surfaceStrong
 
         RowLayout {
             anchors.fill: parent
