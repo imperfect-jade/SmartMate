@@ -7,6 +7,7 @@ Dialog {
     id: root
     required property TaskListViewModel taskList
     required property AppearanceTheme theme
+    property bool actionsVisible: true
     signal editRequested(string taskId)
     signal editDependenciesRequested(string taskId)
 
@@ -92,6 +93,7 @@ Dialog {
             Item { Layout.fillHeight: true }
             RowLayout {
                 Layout.fillWidth: true
+                visible: root.actionsVisible
                 Button {
                     visible: root.taskList.selectedCanEditTask
                     text: qsTr("编辑任务")

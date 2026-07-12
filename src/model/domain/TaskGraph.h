@@ -12,6 +12,9 @@ struct TaskGraphNode final {
     Task task;
     TaskDependencyState dependencyState;
     int dependencyLevel{0};
+    /// 上下游闭包属于领域图语义，供不同 View 复用且不包含任何布局信息。
+    QList<TaskId> predecessorClosureIds;
+    QList<TaskId> successorClosureIds;
 
     friend bool operator==(const TaskGraphNode &, const TaskGraphNode &) = default;
 };

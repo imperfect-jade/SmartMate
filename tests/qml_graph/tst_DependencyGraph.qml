@@ -97,10 +97,13 @@ TestCase {
         verify(edge !== null)
         compare(edge.predecessorId, graphPredecessorId)
         compare(edge.successorId, graphSuccessorId)
-        verify(edge.endX > edge.startX,
-               "Finish-to-Start 箭头必须从前置节点向右指向后继节点")
-        compare(edge.arrowTipX, edge.endX)
-        compare(edge.arrowTipY, edge.endY)
+        verify(edge.routePoints.length >= 2)
+        const start = edge.routePoints[0]
+        const end = edge.routePoints[edge.routePoints.length - 1]
+        verify(end.y > start.y,
+               "Finish-to-Start 箭头必须从前置节点向下指向后继节点")
+        compare(edge.arrowTipX, end.x)
+        compare(edge.arrowTipY, end.y)
     }
 
     function test_cancelledEdgeUsesGreyProjectionAndRedoReactivatesIt() {
@@ -219,8 +222,8 @@ TestCase {
     }
 
     function test_nodeDetailsOpenSharedDependencyEditorByStableId() {
-        showGraphPage()
-        verify(graphTestAppViewModel.taskGraph.selectTask(graphSuccessorId))
+        const page = showGraphPage()
+        page.selectAndCenter(graphSuccessorId)
 
         const title = findChild(subject, "selectedGraphTaskTitle")
         const relations = findChild(subject, "selectedGraphTaskRelations")
@@ -232,6 +235,7 @@ TestCase {
         verify(relations !== null)
         verify(blockingReason !== null)
         verify(editButton !== null)
+        tryCompare(page, "detailsExpanded", true)
         tryCompare(title, "text", "实现任务模块")
         verify(relations.text.indexOf("1") >= 0)
         verify(blockingReason.text.indexOf("需求分析") >= 0)
@@ -243,5 +247,38 @@ TestCase {
         tryCompare(dialog, "visible", true)
         compare(graphTestAppViewModel.taskDependencies.taskId,
                 graphSuccessorId)
+    }
+
+    function test_toolbarSearchFilterAndResponsiveDetailsPanel() {
+        const page = showGraphPage()
+        const search = findChild(subject, "graphSearchField")
+        const filter = findChild(subject, "graphStatusFilter")
+        const details = findChild(subject, "dependencyGraphDetails")
+        const collapse = findChild(subject, "collapseGraphDetailsButton")
+        verify(search !== null)
+        verify(filter !== null)
+        verify(details !== null)
+        verify(collapse !== null)
+
+        search.text = "实现任务"
+        search.textEdited()
+        search.accepted()
+        tryCompare(graphTestAppViewModel.taskGraph, "selectedTaskId", graphSuccessorId)
+        tryCompare(details, "visible", true)
+        compare(page.narrowDetails, false)
+
+        filter.activated(3)
+        tryCompare(graphTestAppViewModel.taskGraph, "statusFilterIndex", 3)
+        collapse.clicked()
+        tryCompare(details, "visible", false)
+
+        subject.width = 900
+        tryCompare(page, "narrowDetails", true)
+        page.selectAndCenter(graphSuccessorId)
+        tryCompare(details, "visible", true)
+        verify(details.width <= page.width * 0.8 + 1)
+        subject.width = 1180
+        graphTestAppViewModel.taskGraph.searchText = ""
+        graphTestAppViewModel.taskGraph.statusFilterIndex = 0
     }
 }

@@ -365,6 +365,12 @@ void TaskOrderingPolicyTest::graphComputesStableLongestLevelsAndConnectedClosure
              QList<TaskId>({taskId(1), taskId(2), taskId(3), taskId(4)}));
     QCOMPARE(graph.connectedTaskIds({taskId(7)}),
              QList<TaskId>({taskId(7)}));
+    QCOMPARE(graph.predecessorClosure(taskId(4)),
+             QList<TaskId>({taskId(1), taskId(2), taskId(3)}));
+    QCOMPARE(graph.successorClosure(taskId(1)),
+             QList<TaskId>({taskId(3), taskId(4)}));
+    QVERIFY(graph.predecessorClosure(taskId(7)).isEmpty());
+    QVERIFY(graph.successorClosure(taskId(7)).isEmpty());
 
     QList<Task> reversedTasks = tasks;
     QList<TaskDependency> reversedDependencies = dependencies;
@@ -375,6 +381,10 @@ void TaskOrderingPolicyTest::graphComputesStableLongestLevelsAndConnectedClosure
     QCOMPARE(reversedGraph.dependencyLevels(), levels);
     QCOMPARE(reversedGraph.connectedTaskIds({taskId(4), taskId(1)}),
              graph.connectedTaskIds({taskId(1), taskId(4)}));
+    QCOMPARE(reversedGraph.predecessorClosure(taskId(4)),
+             graph.predecessorClosure(taskId(4)));
+    QCOMPARE(reversedGraph.successorClosure(taskId(1)),
+             graph.successorClosure(taskId(1)));
 
     const TaskDependencyGraph cyclicGraph{
         {makeTask(1, TaskStatus::Todo), makeTask(2, TaskStatus::Todo)},

@@ -298,6 +298,57 @@ QHash<TaskId, int> TaskDependencyGraph::dependencyLevels() const
     return visitedCount == m_tasks.size() ? levels : QHash<TaskId, int>{};
 }
 
+namespace {
+
+QList<TaskId> directedClosure(const TaskId &taskId,
+                              const QHash<TaskId, QList<TaskId>> &adjacency)
+{
+    QList<TaskId> pending = adjacency.value(taskId);
+    QSet<TaskId> visited;
+    qsizetype index = 0;
+    while (index < pending.size()) {
+        const TaskId current = pending.at(index++);
+        if (visited.contains(current)) {
+            continue;
+        }
+        visited.insert(current);
+        for (const TaskId &next : adjacency.value(current)) {
+            if (!visited.contains(next)) {
+                pending.append(next);
+            }
+        }
+    }
+    QList<TaskId> result(visited.cbegin(), visited.cend());
+    normalizeIds(result);
+    return result;
+}
+
+} // namespace
+
+QList<TaskId> TaskDependencyGraph::predecessorClosure(const TaskId &taskId) const
+{
+    if (!containsTask(taskId) || !validation().ok()) {
+        return {};
+    }
+    QHash<TaskId, QList<TaskId>> predecessors;
+    for (const TaskDependency &dependency : m_dependencies) {
+        predecessors[dependency.successorId].append(dependency.predecessorId);
+    }
+    return directedClosure(taskId, predecessors);
+}
+
+QList<TaskId> TaskDependencyGraph::successorClosure(const TaskId &taskId) const
+{
+    if (!containsTask(taskId) || !validation().ok()) {
+        return {};
+    }
+    QHash<TaskId, QList<TaskId>> successors;
+    for (const TaskDependency &dependency : m_dependencies) {
+        successors[dependency.predecessorId].append(dependency.successorId);
+    }
+    return directedClosure(taskId, successors);
+}
+
 QList<TaskId> TaskDependencyGraph::connectedTaskIds(
     const QList<TaskId> &seedTaskIds) const
 {

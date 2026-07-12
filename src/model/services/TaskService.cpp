@@ -566,7 +566,9 @@ TaskGraphResult TaskService::taskGraphSnapshot() const
             }
             snapshot.nodes.append({plannedTask.task,
                                    plannedTask.dependencyState,
-                                   levels.value(plannedTask.task.id(), 0)});
+                                   levels.value(plannedTask.task.id(), 0),
+                                   graph.predecessorClosure(plannedTask.task.id()),
+                                   graph.successorClosure(plannedTask.task.id())});
         }
 
         QList<TaskDependency> visibleDependencies;

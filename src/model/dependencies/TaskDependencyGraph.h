@@ -46,6 +46,10 @@ public:
 
     /// 返回每个节点的最长前置链层级；根节点为 0，非法图返回空映射。
     [[nodiscard]] QHash<TaskId, int> dependencyLevels() const;
+    /// 返回指定节点全部传递前置，结果按稳定 TaskId 排序；非法或缺失节点返回空集合。
+    [[nodiscard]] QList<TaskId> predecessorClosure(const TaskId &taskId) const;
+    /// 返回指定节点全部传递后继，结果按稳定 TaskId 排序；非法或缺失节点返回空集合。
+    [[nodiscard]] QList<TaskId> successorClosure(const TaskId &taskId) const;
     /// 将有向边视为无向连接，从一组种子求稳定闭包；悬空端点会被忽略。
     [[nodiscard]] QList<TaskId> connectedTaskIds(
         const QList<TaskId> &seedTaskIds) const;

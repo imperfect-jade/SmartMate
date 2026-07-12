@@ -919,6 +919,13 @@ void TaskServiceTest::buildsGraphSnapshotWithArchivedClosure()
     QCOMPARE(rootNode->dependencyLevel, 1);
     QCOMPARE(connectedNode->dependencyLevel, 2);
     QCOMPARE(isolatedNode->dependencyLevel, 0);
+    QCOMPARE(rootNode->predecessorClosureIds,
+             QList<smartmate::model::TaskId>({archivedCompleted.id()}));
+    QCOMPARE(rootNode->successorClosureIds,
+             QList<smartmate::model::TaskId>({connectedArchived.id()}));
+    QCOMPARE(connectedNode->predecessorClosureIds.size(), 2);
+    QVERIFY(connectedNode->predecessorClosureIds.contains(archivedCompleted.id()));
+    QVERIFY(connectedNode->predecessorClosureIds.contains(root.id()));
 
     const auto satisfiedEdge = std::find_if(
         result.value->edges.cbegin(), result.value->edges.cend(),
