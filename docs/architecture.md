@@ -96,7 +96,7 @@ SmartMate             → persistence + viewmodel + ui 插件
 
 带前置关系的新建命令使用独立的原子端口：`TaskEditorViewModel → TaskService → ITaskCreationRepository → SQLite事务`。Service先验证任务字段、候选端点和假想图，再由Persistence在一个事务中插入任务与全部边；任意一步失败都不得留下孤立任务或部分关系。
 
-依赖图读取链路为：`SQLite Repository → TaskService结构化图快照 → TaskGraphViewModel纵向布局与正交路由 → QML Shape渲染`。Model负责最长前置链层级、活动任务及其相连归档节点闭包、上下游闭包、边解析状态和异常图拒绝；ViewModel负责交叉最小化、虚拟路由点、端口、层间通道、像素坐标和详情投影；View只绘制路径、主题与动画，并转发稳定任务ID。布局、筛选、缩放、详情抽屉和选中状态不持久化。
+依赖图读取链路为：`SQLite Repository → TaskService结构化图快照 → TaskGraphViewModel纵向布局与正交路由 → QML Shape渲染`。Model负责最长前置链层级、活动任务及其相连归档节点闭包、上下游闭包、边解析状态和异常图拒绝；ViewModel负责交叉最小化、虚拟路由点、端口、层间通道、像素坐标和详情投影；View只绘制路径、主题与动画，并转发稳定任务ID。布局、筛选、缩放、响应式详情面板和选中状态不持久化。
 
 `view.qml_bootstrap` CTest 使用内存 SQLite 和 Qt 离屏平台执行整条链路，并在根对象创建成功后自动退出。它可以发现数据库驱动、QML 模块、属性注入和运行库加载问题，同时不会写入用户数据。
 

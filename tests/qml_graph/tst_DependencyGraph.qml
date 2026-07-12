@@ -45,6 +45,18 @@ TestCase {
         return null
     }
 
+    function graphNodeDelegate(taskId) {
+        const repeater = findChild(subject, "dependencyGraphNodeRepeater")
+        if (repeater === null)
+            return null
+        for (let row = 0; row < repeater.count; ++row) {
+            const delegate = repeater.itemAt(row)
+            if (delegate !== null && delegate.taskId === taskId)
+                return delegate
+        }
+        return null
+    }
+
     function initTestCase() {
         verify(graphTestAppViewModel !== null)
         subject = mainComponent.createObject(testCase)
@@ -254,30 +266,62 @@ TestCase {
         const search = findChild(subject, "graphSearchField")
         const filter = findChild(subject, "graphStatusFilter")
         const details = findChild(subject, "dependencyGraphDetails")
+        const canvasFrame = findChild(subject, "dependencyGraphCanvasFrame")
+        const viewport = findChild(subject, "dependencyGraphViewport")
+        const detailsScroll = findChild(subject, "graphDetailsScrollView")
         const collapse = findChild(subject, "collapseGraphDetailsButton")
         verify(search !== null)
         verify(filter !== null)
         verify(details !== null)
+        verify(canvasFrame !== null)
+        verify(viewport !== null)
+        verify(detailsScroll !== null)
         verify(collapse !== null)
+
+        function verifySideBySide(windowWidth, windowHeight) {
+            subject.width = windowWidth
+            subject.height = windowHeight
+            page.selectAndCenter(graphSuccessorId)
+            tryCompare(details, "visible", true)
+            wait(260)
+            verify(canvasFrame.width >= 499,
+                   "最小窗口下依赖图画布必须保留约500px可视宽度")
+            verify(details.width >= 259 && details.width <= 341)
+            verify(canvasFrame.x + canvasFrame.width + page.panelGap
+                   <= details.x + 1,
+                   "画布与详情面板必须左右并排且不能重叠")
+            verify(detailsScroll.width <= details.width)
+            const node = graphNodeDelegate(graphSuccessorId)
+            verify(node !== null)
+            const center = node.mapToItem(viewport, node.width / 2, node.height / 2)
+            verify(center.x >= 0 && center.x <= viewport.width)
+            verify(center.y >= 0 && center.y <= viewport.height)
+        }
 
         search.text = "实现任务"
         search.textEdited()
         search.accepted()
         tryCompare(graphTestAppViewModel.taskGraph, "selectedTaskId", graphSuccessorId)
         tryCompare(details, "visible", true)
-        compare(page.narrowDetails, false)
 
         filter.activated(3)
         tryCompare(graphTestAppViewModel.taskGraph, "statusFilterIndex", 3)
+        page.setZoom(1.3)
         collapse.clicked()
         tryCompare(details, "visible", false)
+        wait(220)
+        compare(viewport.zoomFactor, 1.3)
 
-        subject.width = 900
-        tryCompare(page, "narrowDetails", true)
-        page.selectAndCenter(graphSuccessorId)
-        tryCompare(details, "visible", true)
-        verify(details.width <= page.width * 0.8 + 1)
+        verifySideBySide(900, 620)
+        compare(viewport.zoomFactor, 1.3)
+        verifySideBySide(1000, 700)
+        verifySideBySide(1180, 760)
+
+        graphTestAppViewModel.appearanceSettings.fontScaleIndex = 2
+        verifySideBySide(900, 620)
+        graphTestAppViewModel.appearanceSettings.resetDefaults()
         subject.width = 1180
+        subject.height = 760
         graphTestAppViewModel.taskGraph.searchText = ""
         graphTestAppViewModel.taskGraph.statusFilterIndex = 0
     }

@@ -14,13 +14,19 @@ Page {
     signal editDependenciesRequested(string taskId)
 
     readonly property TaskGraphViewModel graph: appViewModel.taskGraph
-    readonly property bool narrowDetails: width < theme.px(900)
-    readonly property real detailsWidth: narrowDetails
-                                         ? Math.min(theme.px(340), width * 0.8)
-                                         : theme.px(340)
+    readonly property real panelGap: 12
+    readonly property real minimumCanvasWidth: 500
+    readonly property real detailsWidth: Math.max(260, Math.min(
+        340, contentArea.width * 0.36,
+        Math.max(260, contentArea.width - minimumCanvasWidth - panelGap)))
     property bool detailsExpanded: false
     property bool detailsPinned: false
     property bool viewportInitialized: false
+
+    function scheduleSelectedNodeCentering() {
+        if (graph.selectedTaskId.length > 0)
+            layoutSettleTimer.restart()
+    }
 
     function setZoom(value) {
         graphViewport.zoomFactor = Math.max(0.5, Math.min(2.0, value))
@@ -56,7 +62,7 @@ Page {
     function selectAndCenter(taskId) {
         if (graph.selectTask(taskId)) {
             detailsExpanded = true
-            Qt.callLater(centerSelectedNode)
+            scheduleSelectedNodeCentering()
         }
     }
 
@@ -120,7 +126,7 @@ Page {
                         onAccepted: {
                             if (root.graph.locateFirstMatch()) {
                                 root.detailsExpanded = true
-                                Qt.callLater(root.centerSelectedNode)
+                                root.scheduleSelectedNodeCentering()
                             }
                         }
                     }
@@ -145,7 +151,7 @@ Page {
                         onClicked: {
                             if (root.graph.selectCurrentTask()) {
                                 root.detailsExpanded = true
-                                Qt.callLater(root.centerSelectedNode)
+                                root.scheduleSelectedNodeCentering()
                             }
                         }
                     }
@@ -179,13 +185,19 @@ Page {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 anchors.right: parent.right
-                anchors.rightMargin: root.detailsExpanded && !root.narrowDetails
-                                     ? root.detailsWidth + root.theme.px(12) : 0
+                anchors.rightMargin: root.detailsExpanded
+                                     ? root.detailsWidth + root.panelGap : 0
                 radius: 12
                 color: root.theme.surface
                 border.color: root.theme.border
                 clip: true
-                Behavior on anchors.rightMargin { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                Behavior on anchors.rightMargin {
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                        onFinished: root.scheduleSelectedNodeCentering()
+                    }
+                }
 
                 Flickable {
                     id: graphViewport
@@ -272,11 +284,10 @@ Page {
                 visible: root.detailsExpanded
                 width: root.detailsWidth
                 anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
-                z: root.narrowDetails ? 20 : 1
+                z: 1
                 radius: 12
                 color: root.theme.surfaceElevated
                 border.color: root.theme.border
-                layer.enabled: root.narrowDetails
                 Behavior on opacity { NumberAnimation { duration: 160 } }
 
                 ColumnLayout {
@@ -290,18 +301,21 @@ Page {
                         ToolButton { objectName: "collapseGraphDetailsButton"; text: "›"; onClicked: root.detailsExpanded = false }
                     }
                     ScrollView {
+                        id: detailsScroll
+                        objectName: "graphDetailsScrollView"
                         Layout.fillWidth: true; Layout.fillHeight: true
+                        contentWidth: availableWidth
                         clip: true; ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                         ColumnLayout {
-                            width: parent.width
+                            width: detailsScroll.availableWidth
                             spacing: root.theme.px(10)
-                            Label { objectName: "selectedGraphTaskTitle"; Layout.fillWidth: true; text: root.graph.selectedTaskTitle; color: root.theme.textPrimary; font.pixelSize: root.theme.px(17); font.bold: true; wrapMode: Text.Wrap }
-                            Label { Layout.fillWidth: true; text: qsTr("%1 · %2优先级").arg(root.graph.selectedStatusText).arg(root.graph.selectedPriorityText); color: root.theme.textSecondary }
-                            Label { Layout.fillWidth: true; text: root.graph.selectedDescription.length > 0 ? root.graph.selectedDescription : qsTr("暂无描述"); color: root.graph.selectedDescription.length > 0 ? root.theme.textBody : root.theme.textMuted; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight }
+                            Label { objectName: "selectedGraphTaskTitle"; Layout.fillWidth: true; Layout.minimumWidth: 0; text: root.graph.selectedTaskTitle; color: root.theme.textPrimary; font.pixelSize: root.theme.px(17); font.bold: true; wrapMode: Text.Wrap }
+                            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: qsTr("%1 · %2优先级").arg(root.graph.selectedStatusText).arg(root.graph.selectedPriorityText); color: root.theme.textSecondary; wrapMode: Text.Wrap }
+                            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: root.graph.selectedDescription.length > 0 ? root.graph.selectedDescription : qsTr("暂无描述"); color: root.graph.selectedDescription.length > 0 ? root.theme.textBody : root.theme.textMuted; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight }
                             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.borderSoft }
-                            Label { Layout.fillWidth: true; text: qsTr("截止时间  %1").arg(root.graph.selectedDeadlineText); color: root.theme.textSecondary; wrapMode: Text.Wrap }
-                            Label { Layout.fillWidth: true; text: qsTr("预计用时  %1").arg(root.graph.selectedEstimatedDurationText); color: root.theme.textSecondary; wrapMode: Text.Wrap }
-                            Label { objectName: "selectedGraphTaskRelations"; Layout.fillWidth: true; text: qsTr("直接前置 %1 项 · 直接后继 %2 项 · 可解锁 %3 项").arg(root.graph.selectedPredecessorCount).arg(root.graph.selectedSuccessorCount).arg(root.graph.selectedUnlockCount); color: root.theme.textSecondary; wrapMode: Text.Wrap }
+                            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: qsTr("截止时间  %1").arg(root.graph.selectedDeadlineText); color: root.theme.textSecondary; wrapMode: Text.Wrap }
+                            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: qsTr("预计用时  %1").arg(root.graph.selectedEstimatedDurationText); color: root.theme.textSecondary; wrapMode: Text.Wrap }
+                            Label { objectName: "selectedGraphTaskRelations"; Layout.fillWidth: true; Layout.minimumWidth: 0; text: qsTr("直接前置 %1 项 · 直接后继 %2 项 · 可解锁 %3 项").arg(root.graph.selectedPredecessorCount).arg(root.graph.selectedSuccessorCount).arg(root.graph.selectedUnlockCount); color: root.theme.textSecondary; wrapMode: Text.Wrap }
                             Rectangle {
                                 Layout.fillWidth: true
                                 visible: root.graph.selectedBlockingReason.length > 0
@@ -314,6 +328,7 @@ Page {
                                 required property string heading
                                 required property var relationModel
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 0
                                 spacing: 5
                                 Label { text: parent.heading; color: root.theme.textPrimary; font.bold: true }
                                 Repeater {
@@ -325,11 +340,12 @@ Page {
                                         required property string statusText
                                         required property string relationText
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         implicitHeight: root.theme.px(48)
                                         contentItem: ColumnLayout {
                                             spacing: 1
-                                            Label { Layout.fillWidth: true; text: relationButton.title; color: root.theme.textPrimary; elide: Text.ElideRight }
-                                            Label { Layout.fillWidth: true; text: relationButton.statusText + " · " + relationButton.relationText; color: root.theme.textMuted; font.pixelSize: root.theme.px(11); elide: Text.ElideRight }
+                                            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: relationButton.title; color: root.theme.textPrimary; elide: Text.ElideRight }
+                                            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: relationButton.statusText + " · " + relationButton.relationText; color: root.theme.textMuted; font.pixelSize: root.theme.px(11); elide: Text.ElideRight }
                                         }
                                         onClicked: root.selectAndCenter(relationButton.taskId)
                                     }
@@ -355,6 +371,13 @@ Page {
         actionsVisible: false
     }
 
+    Timer {
+        id: layoutSettleTimer
+        interval: 210
+        repeat: false
+        onTriggered: root.centerSelectedNode()
+    }
+
     Connections {
         target: root.graph
         function onSelectionChanged() {
@@ -371,4 +394,9 @@ Page {
             Qt.callLater(fitContent)
         }
     }
+    onWidthChanged: {
+        if (detailsExpanded)
+            scheduleSelectedNodeCentering()
+    }
+    onDetailsExpandedChanged: scheduleSelectedNodeCentering()
 }
