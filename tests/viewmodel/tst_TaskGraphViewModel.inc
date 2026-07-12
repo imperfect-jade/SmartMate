@@ -18,7 +18,7 @@ void TaskViewModelsTest::graphProjectsNodesEdgesAndSelectionDetails()
     }};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskGraphViewModel graph{service};
 
     QCOMPARE(graph.rowCount(), 3);
@@ -142,7 +142,7 @@ void TaskViewModelsTest::graphMinimizesSimpleLayerCrossing()
         {rootA.id(), childY.id()}, {rootB.id(), childX.id()}}};
     FakeTaskCreationRepository creation{repository, dependencies};
     TaskService service{repository, dependencies, creation,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskGraphViewModel graph{service};
 
     const auto xFor = [&graph](const Task &value) {
@@ -167,7 +167,7 @@ void TaskViewModelsTest::graphRoutesLongEdgesDeterministically()
         {first.id(), second.id()}, {second.id(), third.id()}, {first.id(), third.id()}}};
     FakeTaskCreationRepository creation{repository, dependencies};
     TaskService service{repository, dependencies, creation,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskGraphViewModel firstProjection{service};
     TaskGraphViewModel secondProjection{service};
 
@@ -214,7 +214,7 @@ void TaskViewModelsTest::graphReloadPreservesVisibleSelectionAndClearsHiddenSele
     }};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskGraphViewModel graph{service};
 
     const QString successorId = successor.id().toString(QUuid::WithoutBraces);

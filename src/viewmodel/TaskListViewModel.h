@@ -6,6 +6,7 @@
 
 #include <QAbstractListModel>
 #include <QHash>
+#include <QSet>
 #include <QStringList>
 #include <QTimer>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -27,6 +28,14 @@ class TaskListViewModel final : public QAbstractListModel {
     Q_PROPERTY(QStringList priorityFilterOptions READ priorityFilterOptions CONSTANT)
     Q_PROPERTY(bool hasActiveFilters READ hasActiveFilters NOTIFY hasActiveFiltersChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(bool bulkSelectionMode READ bulkSelectionMode NOTIFY bulkSelectionChanged)
+    Q_PROPERTY(int bulkSelectedCount READ bulkSelectedCount NOTIFY bulkSelectionChanged)
+    Q_PROPERTY(int bulkSelectableVisibleCount READ bulkSelectableVisibleCount
+                   NOTIFY bulkSelectionChanged)
+    Q_PROPERTY(bool allVisibleSelected READ allVisibleSelected NOTIFY bulkSelectionChanged)
+    Q_PROPERTY(bool canBulkArchive READ canBulkArchive NOTIFY bulkSelectionChanged)
+    Q_PROPERTY(bool canBulkRestore READ canBulkRestore NOTIFY bulkSelectionChanged)
+    Q_PROPERTY(bool canBulkDelete READ canBulkDelete NOTIFY bulkSelectionChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     Q_PROPERTY(FocusState focusState READ focusState NOTIFY focusTaskChanged)
     Q_PROPERTY(QString focusTaskId READ focusTaskId NOTIFY focusTaskChanged)
@@ -96,6 +105,8 @@ public:
         CanArchiveRole,
         CanRestoreRole,
         CanDeletePermanentlyRole,
+        BulkSelectedRole,
+        BulkSelectableRole,
     };
     Q_ENUM(Role)
 
@@ -111,6 +122,13 @@ public:
     [[nodiscard]] int priorityFilterIndex() const noexcept;
     [[nodiscard]] QStringList priorityFilterOptions() const;
     [[nodiscard]] bool hasActiveFilters() const;
+    [[nodiscard]] bool bulkSelectionMode() const noexcept;
+    [[nodiscard]] int bulkSelectedCount() const noexcept;
+    [[nodiscard]] int bulkSelectableVisibleCount() const;
+    [[nodiscard]] bool allVisibleSelected() const;
+    [[nodiscard]] bool canBulkArchive() const noexcept;
+    [[nodiscard]] bool canBulkRestore() const;
+    [[nodiscard]] bool canBulkDelete() const noexcept;
     [[nodiscard]] QString errorMessage() const;
     [[nodiscard]] FocusState focusState() const noexcept;
     [[nodiscard]] QString focusTaskId() const;
@@ -161,6 +179,22 @@ public:
     Q_INVOKABLE bool restoreTask(const QString &taskId);
     /// 永久删除已归档任务；关联依赖由 Model 的原子删除端口统一清理。
     Q_INVOKABLE bool deleteArchivedTask(const QString &taskId);
+    /// 进入会话级批量选择模式；此时不会自动选择任何任务。
+    Q_INVOKABLE void beginBulkSelection();
+    /// 按稳定 TaskId 切换选择；不具备当前批量操作资格的任务会被忽略。
+    Q_INVOKABLE bool toggleBulkSelection(const QString &taskId);
+    /// 选择或取消选择当前筛选结果中所有具备批量资格的任务。
+    Q_INVOKABLE void toggleSelectAllVisible();
+    /// 清空批量选择但保持批量模式。
+    Q_INVOKABLE void clearBulkSelection();
+    /// 清空选择并退出批量模式。
+    Q_INVOKABLE void cancelBulkSelection();
+    /// 将选中的已完成/已取消任务作为一个原子批次归档。
+    Q_INVOKABLE bool archiveSelectedTasks();
+    /// 将选中的归档任务作为一个原子批次恢复。
+    Q_INVOKABLE bool restoreSelectedTasks();
+    /// 将选中的归档任务及其关联依赖作为一个原子批次永久删除。
+    Q_INVOKABLE bool deleteSelectedArchivedTasks();
     Q_INVOKABLE void clearError();
     Q_INVOKABLE bool selectTask(const QString &taskId);
     Q_INVOKABLE void clearSelection();
@@ -171,6 +205,7 @@ signals:
     void priorityFilterIndexChanged();
     void hasActiveFiltersChanged();
     void countChanged();
+    void bulkSelectionChanged();
     void errorMessageChanged();
     void errorOccurred(const QString &message);
     void focusTaskChanged();
@@ -195,6 +230,11 @@ private:
     [[nodiscard]] const model::Task *selectedTask() const;
     [[nodiscard]] const model::TaskCommandAvailability &availabilityFor(
         const model::TaskId &taskId) const;
+    [[nodiscard]] bool isBulkSelectable(const model::TaskId &taskId) const;
+    [[nodiscard]] QList<model::TaskId> sortedBulkSelection() const;
+    [[nodiscard]] QString taskIdsContext(const QList<model::TaskId> &taskIds) const;
+    void pruneBulkSelection();
+    void setBulkSelection(QSet<model::TaskId> selection);
     void rebuildFocusTask();
     bool performTransition(const QString &taskId, model::TaskTransition transition);
     void rebuildVisibleTasks();
@@ -207,6 +247,8 @@ private:
     // 全量计划顺序与当前可见投影分离，搜索和筛选不会修改领域数据。
     QList<model::Task> m_allTasks;
     QList<model::Task> m_visibleTasks;
+    // 当前搜索、筛选与活动/归档范围内的稳定ID集合，用于O(1)批量资格检查。
+    QSet<model::TaskId> m_visibleTaskIds;
     QHash<model::TaskId, QString> m_orderReasonTexts;
     // 逾期随当前时间变化，是 Model 计算后交给 ViewModel 的会话级投影。
     QHash<model::TaskId, bool> m_overdueStates;
@@ -215,6 +257,9 @@ private:
     model::TaskId m_focusTaskId;
     FocusState m_focusState{FocusState::NoTasks};
     model::TaskId m_selectedTaskId;
+    // 批量选择与详情选择相互独立，只保存稳定 TaskId，且绝不写入持久化层。
+    QSet<model::TaskId> m_bulkSelectedTaskIds;
+    bool m_bulkSelectionMode{false};
     bool m_showArchived{false};
     QString m_searchText;
     // 0表示全部，1～4分别映射Low～Urgent；非法索引不会替换当前条件。

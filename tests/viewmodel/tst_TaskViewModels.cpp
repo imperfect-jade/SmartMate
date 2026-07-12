@@ -5,6 +5,7 @@
 #include "TaskListViewModel.h"
 #include "fakes/FakeTaskDependencyRepository.h"
 #include "fakes/FakeTaskCreationRepository.h"
+#include "fakes/FakeTaskBatchTransitionRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
 #include "fakes/FakeTaskRepository.h"
 
@@ -30,6 +31,7 @@ using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
 using smartmate::tests::FakeTaskRepository;
 using smartmate::tests::FakeTaskCreationRepository;
+using smartmate::tests::FakeTaskBatchTransitionRepository;
 using smartmate::tests::FakeTaskDeletionRepository;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::viewmodel::AppViewModel;
@@ -42,6 +44,15 @@ namespace {
 
 // 各ViewModel测试只借用删除端口；端口生命周期覆盖全部局部Service。
 FakeTaskDeletionRepository deletionRepository;
+
+/// 为既有ViewModel测试按其局部任务仓库重建原子状态端口，避免各用例重复样板。
+[[nodiscard]] FakeTaskBatchTransitionRepository &batchTransitionsFor(
+    FakeTaskRepository &repository)
+{
+    static std::optional<FakeTaskBatchTransitionRepository> batchRepository;
+    batchRepository.emplace(repository);
+    return *batchRepository;
+}
 
 [[nodiscard]] QDateTime utcTime(const qint64 milliseconds)
 {
@@ -152,6 +163,9 @@ private slots:
     void listProjectsAndExecutesStateActionsByStableTaskId();
     void onlyTodoTasksCanOpenEditor();
     void listProjectsAndForwardsPermanentDeletionByStableTaskId();
+    void listMaintainsBulkSelectionByStableIdAndResetsAtDisplayBoundaries();
+    void listExecutesAtomicBulkCommandsAndPreservesFailedSelection();
+    void listMapsBatchConflictIdsToTaskTitles();
     void listExposesAndClearsChineseErrors();
     void listProjectsBlockingAndUnlockInformation();
     void listFocusProjectionIgnoresFiltersAndTracksInProgress();
@@ -185,7 +199,7 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     AppViewModel app{service};
 
     QCOMPARE(app.applicationName(), QStringLiteral("SmartMate"));

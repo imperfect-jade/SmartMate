@@ -62,6 +62,7 @@ Page {
         // 任务槽只消费 ViewModel 投影，并通过稳定 TaskId 转发命令。
         TaskFocusCard {
             Layout.fillWidth: true
+            visible: !root.appViewModel.taskList.bulkSelectionMode
             taskList: root.appViewModel.taskList
             theme: root.theme
             dragPreview: dragPreview
@@ -78,6 +79,18 @@ Page {
             taskList: root.appViewModel.taskList
             theme: root.theme
             onNewTaskRequested: root.beginCreate()
+            onBulkArchiveRequested: {
+                bulkArchiveDialog.pendingCount =
+                    root.appViewModel.taskList.bulkSelectedCount
+                bulkArchiveDialog.open()
+            }
+            onBulkRestoreRequested:
+                root.appViewModel.taskList.restoreSelectedTasks()
+            onBulkDeleteRequested: {
+                bulkDeleteDialog.pendingCount =
+                    root.appViewModel.taskList.bulkSelectedCount
+                bulkDeleteDialog.open()
+            }
         }
 
         Rectangle {
@@ -98,6 +111,7 @@ Page {
                     width: ListView.view.width
                     theme: root.theme
                     dragPreview: dragPreview
+                    bulkSelectionMode: root.appViewModel.taskList.bulkSelectionMode
 
                     onDetailsRequested: taskId => root.openDetails(taskId)
                     onEditRequested: taskId => root.openEditor(taskId)
@@ -126,6 +140,8 @@ Page {
                         deleteDialog.pendingTitle = title
                         deleteDialog.open()
                     }
+                    onBulkSelectionToggled: taskId =>
+                        root.appViewModel.taskList.toggleBulkSelection(taskId)
                     onDragActiveRequested: active => root.dragActive = active
                 }
                 ScrollBar.vertical: ScrollBar { }
@@ -266,6 +282,42 @@ Page {
         }
         onAccepted:
             root.appViewModel.taskList.deleteArchivedTask(pendingTaskId)
+    }
+    Dialog {
+        id: bulkArchiveDialog
+        objectName: "bulkArchiveTaskDialog"
+        property int pendingCount: 0
+        anchors.centerIn: Overlay.overlay
+        width: 430
+        title: qsTr("确认批量归档")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label {
+            objectName: "bulkArchiveTaskWarning"
+            width: 380
+            wrapMode: Text.Wrap
+            text: qsTr("确定要归档选中的 %1 项任务吗？之后可在归档视图中恢复。")
+                  .arg(bulkArchiveDialog.pendingCount)
+        }
+        onAccepted: root.appViewModel.taskList.archiveSelectedTasks()
+    }
+    Dialog {
+        id: bulkDeleteDialog
+        objectName: "bulkDeleteArchivedTaskDialog"
+        property int pendingCount: 0
+        anchors.centerIn: Overlay.overlay
+        width: 470
+        title: qsTr("确认批量永久删除")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        Label {
+            objectName: "bulkDeleteArchivedTaskWarning"
+            width: 420
+            wrapMode: Text.Wrap
+            text: qsTr("确定要永久删除选中的 %1 项归档任务吗？此操作不可撤销，关联的全部前置和后继依赖也会永久删除。")
+                  .arg(bulkDeleteDialog.pendingCount)
+        }
+        onAccepted: root.appViewModel.taskList.deleteSelectedArchivedTasks()
     }
     Dialog {
         id: errorDialog

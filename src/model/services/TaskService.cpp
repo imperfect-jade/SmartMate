@@ -19,12 +19,14 @@ namespace smartmate::model {
 TaskService::TaskService(ITaskRepository &repository,
                          ITaskDependencyRepository &dependencyRepository,
                          ITaskCreationRepository &creationRepository,
+                         ITaskBatchTransitionRepository &batchTransitionRepository,
                          ITaskDeletionRepository &deletionRepository,
                          QObject *parent)
     : QObject(parent)
     , m_repository(repository)
     , m_dependencyRepository(dependencyRepository)
     , m_creationRepository(creationRepository)
+    , m_batchTransitionRepository(batchTransitionRepository)
     , m_deletionRepository(deletionRepository)
 {
 }
@@ -580,59 +582,231 @@ TaskResult TaskService::redoTask(const TaskId &id)
 
 TaskResult TaskService::archiveTask(const TaskId &id)
 {
-    return applyTransition(id, TaskTransition::Archive);
+    return singleTaskResult(archiveTasks({id}), id);
+}
+
+TaskBatchResult TaskService::archiveTasks(const QList<TaskId> &taskIds)
+{
+    return applyBatchTransition(taskIds, TaskTransition::Archive);
 }
 
 TaskResult TaskService::restoreTask(const TaskId &id)
 {
-    return applyTransition(id, TaskTransition::Restore);
+    return singleTaskResult(restoreTasks({id}), id);
+}
+
+TaskBatchResult TaskService::restoreTasks(const QList<TaskId> &taskIds)
+{
+    return applyBatchTransition(taskIds, TaskTransition::Restore);
 }
 
 TaskResult TaskService::deleteArchivedTask(const TaskId &id)
 {
+    return singleTaskResult(deleteArchivedTasks({id}), id);
+}
+
+TaskBatchResult TaskService::deleteArchivedTasks(const QList<TaskId> &taskIds)
+{
+    QList<TaskId> normalizedTaskIds = taskIds;
+    normalizeIds(normalizedTaskIds);
+    if (normalizedTaskIds.isEmpty()) {
+        return TaskBatchResult::failure(
+            TaskError::EmptyTaskSelection,
+            QStringLiteral("At least one task must be selected."));
+    }
+
     try {
-        const std::optional<Task> current = m_repository.findById(id);
-        if (!current.has_value()) {
-            return TaskResult::failure(TaskError::NotFound,
-                                       QStringLiteral("Task was not found."));
+        const QList<Task> tasks = m_repository.findAll();
+        const QHash<TaskId, qsizetype> taskIndexes = taskIndexesById(tasks);
+        // 统一读取依赖快照，使批量命令的读失败语义一致；边的实际去重与删除由原子端口负责。
+        const QList<TaskDependency> dependencies =
+            m_dependencyRepository.findAllDependencies();
+        Q_UNUSED(dependencies);
+
+        QList<TaskId> missingTaskIds;
+        QList<TaskId> ineligibleTaskIds;
+        QList<Task> selectedTasks;
+        selectedTasks.reserve(normalizedTaskIds.size());
+        for (const TaskId &taskId : std::as_const(normalizedTaskIds)) {
+            const auto taskIndex = taskIndexes.constFind(taskId);
+            if (taskIndex == taskIndexes.cend()) {
+                missingTaskIds.append(taskId);
+                continue;
+            }
+            const Task &task = tasks.at(taskIndex.value());
+            if (!task.canDeletePermanently()) {
+                ineligibleTaskIds.append(taskId);
+            } else {
+                selectedTasks.append(task);
+            }
         }
-        if (!current->canDeletePermanently()) {
-            return TaskResult::failure(
+
+        if (!missingTaskIds.isEmpty()) {
+            return TaskBatchResult::failure(
+                TaskError::NotFound,
+                QStringLiteral("One or more selected tasks were not found."),
+                TaskErrorContext{{}, std::move(missingTaskIds), {}});
+        }
+        if (!ineligibleTaskIds.isEmpty()) {
+            return TaskBatchResult::failure(
                 TaskError::TaskDeletionNotAllowed,
-                QStringLiteral("Only an archived task can be permanently deleted."),
-                TaskErrorContext{{}, {id}, {}});
+                QStringLiteral("Only archived tasks can be permanently deleted."),
+                TaskErrorContext{{}, std::move(ineligibleTaskIds), {}});
         }
 
         const TaskDeletionWriteResult writeResult =
-            m_deletionRepository.deleteArchivedTaskWithDependencies(id);
-        if (!writeResult.taskDeleted) {
-            // 端口的条件删除会在状态竞争或目标消失时完整回滚；重读后返回稳定业务错误。
-            const std::optional<Task> latest = m_repository.findById(id);
-            if (!latest.has_value()) {
-                return TaskResult::failure(
+            m_deletionRepository.deleteArchivedTasksWithDependencies(
+                normalizedTaskIds);
+        if (!writeResult.conflictingTaskIds.isEmpty()) {
+            QList<TaskId> conflicts = writeResult.conflictingTaskIds;
+            normalizeIds(conflicts);
+            // 条件删除无法区分“目标消失”和“状态变化”；回滚后重读以恢复准确业务错误。
+            const QList<Task> latestTasks = m_repository.findAll();
+            const QHash<TaskId, qsizetype> latestIndexes =
+                taskIndexesById(latestTasks);
+            QList<TaskId> missingIds;
+            QList<TaskId> statusConflictIds;
+            for (const TaskId &conflictId : std::as_const(conflicts)) {
+                const auto latestIndex = latestIndexes.constFind(conflictId);
+                if (latestIndex == latestIndexes.cend()) {
+                    missingIds.append(conflictId);
+                } else if (!latestTasks.at(latestIndex.value())
+                                .canDeletePermanently()) {
+                    statusConflictIds.append(conflictId);
+                }
+            }
+            if (!missingIds.isEmpty()) {
+                return TaskBatchResult::failure(
                     TaskError::NotFound,
-                    QStringLiteral("Task was not found during permanent deletion."));
+                    QStringLiteral("Selected tasks disappeared before permanent deletion."),
+                    TaskErrorContext{{}, std::move(missingIds), {}});
             }
-            if (!latest->canDeletePermanently()) {
-                return TaskResult::failure(
+            if (!statusConflictIds.isEmpty()) {
+                return TaskBatchResult::failure(
                     TaskError::TaskDeletionNotAllowed,
-                    QStringLiteral("Task is no longer archived and cannot be permanently deleted."),
-                    TaskErrorContext{{}, {id}, {}});
+                    QStringLiteral("Selected tasks changed before permanent deletion."),
+                    TaskErrorContext{{}, std::move(statusConflictIds), {}});
             }
-            return TaskResult::failure(
+            return TaskBatchResult::failure(
                 TaskError::PersistenceFailure,
-                QStringLiteral("Deletion repository did not delete the archived task."));
+                QStringLiteral("Deletion repository reported an unexplained batch conflict."),
+                TaskErrorContext{{}, std::move(conflicts), {}});
+        }
+        if (writeResult.deletedTaskCount != normalizedTaskIds.size()) {
+            return TaskBatchResult::failure(
+                TaskError::PersistenceFailure,
+                QStringLiteral("Deletion repository did not delete the complete batch."));
         }
 
         emit tasksChanged();
         if (writeResult.removedDependencyCount > 0) {
             emit dependenciesChanged();
         }
-        return TaskResult::success(*current);
+        return TaskBatchResult::success(
+            TaskBatchOutcome{std::move(selectedTasks),
+                             writeResult.removedDependencyCount});
     } catch (const RepositoryException &exception) {
-        return persistenceFailure(exception);
+        return batchPersistenceFailure(exception);
     } catch (...) {
-        return unexpectedPersistenceFailure();
+        return unexpectedBatchPersistenceFailure();
+    }
+}
+
+TaskBatchResult TaskService::applyBatchTransition(
+    const QList<TaskId> &taskIds,
+    const TaskTransition transition)
+{
+    QList<TaskId> normalizedTaskIds = taskIds;
+    normalizeIds(normalizedTaskIds);
+    if (normalizedTaskIds.isEmpty()) {
+        return TaskBatchResult::failure(
+            TaskError::EmptyTaskSelection,
+            QStringLiteral("At least one task must be selected."));
+    }
+
+    try {
+        QList<Task> tasks = m_repository.findAll();
+        const QHash<TaskId, qsizetype> taskIndexes = taskIndexesById(tasks);
+        const QList<TaskDependency> dependencies =
+            m_dependencyRepository.findAllDependencies();
+        QList<TaskId> missingTaskIds;
+        QList<TaskId> ineligibleTaskIds;
+        QList<Task> transitionedTasks;
+        transitionedTasks.reserve(normalizedTaskIds.size());
+        QList<TaskStateChange> changes;
+        changes.reserve(normalizedTaskIds.size());
+        QSet<TaskId> changedTaskIds;
+        const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+
+        for (const TaskId &taskId : std::as_const(normalizedTaskIds)) {
+            const auto taskIndex = taskIndexes.constFind(taskId);
+            if (taskIndex == taskIndexes.cend()) {
+                missingTaskIds.append(taskId);
+                continue;
+            }
+            const Task current = tasks.at(taskIndex.value());
+            const std::optional<TaskStatus> targetStatus =
+                TaskStateMachine::targetStatus(current, transition);
+            if (!targetStatus.has_value()) {
+                ineligibleTaskIds.append(taskId);
+                continue;
+            }
+            const std::optional<TaskStatus> statusBeforeArchive =
+                transition == TaskTransition::Archive
+                ? std::optional<TaskStatus>{current.status()}
+                : std::nullopt;
+            Task transitioned = makeTaskWithStatus(
+                current, *targetStatus, statusBeforeArchive, nowUtc);
+            changes.append({taskId,
+                            current.status(),
+                            *targetStatus,
+                            statusBeforeArchive,
+                            nowUtc});
+            transitionedTasks.append(transitioned);
+            tasks[taskIndex.value()] = transitioned;
+            changedTaskIds.insert(taskId);
+        }
+
+        if (!missingTaskIds.isEmpty()) {
+            return TaskBatchResult::failure(
+                TaskError::NotFound,
+                QStringLiteral("One or more selected tasks were not found."),
+                TaskErrorContext{{}, std::move(missingTaskIds), {}});
+        }
+        if (!ineligibleTaskIds.isEmpty()) {
+            return TaskBatchResult::failure(
+                TaskError::InvalidTaskTransition,
+                QStringLiteral("One or more selected tasks do not allow this transition."),
+                TaskErrorContext{{}, std::move(ineligibleTaskIds), {}});
+        }
+        if (const auto dependencyFailure = batchDependencyStateFailure(
+                tasks, dependencies, changedTaskIds)) {
+            return *dependencyFailure;
+        }
+
+        const TaskBatchWriteResult writeResult =
+            m_batchTransitionRepository.updateTaskStatesAtomically(changes);
+        if (!writeResult.conflictingTaskIds.isEmpty()) {
+            QList<TaskId> conflicts = writeResult.conflictingTaskIds;
+            normalizeIds(conflicts);
+            return TaskBatchResult::failure(
+                TaskError::InvalidTaskTransition,
+                QStringLiteral("Selected task states changed before the batch write."),
+                TaskErrorContext{{}, std::move(conflicts), {}});
+        }
+        if (writeResult.updatedTaskCount != changes.size()) {
+            return TaskBatchResult::failure(
+                TaskError::PersistenceFailure,
+                QStringLiteral("Batch transition repository did not update every task."));
+        }
+
+        emit tasksChanged();
+        return TaskBatchResult::success(
+            TaskBatchOutcome{std::move(transitionedTasks), 0});
+    } catch (const RepositoryException &exception) {
+        return batchPersistenceFailure(exception);
+    } catch (...) {
+        return unexpectedBatchPersistenceFailure();
     }
 }
 

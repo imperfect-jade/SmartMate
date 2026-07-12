@@ -20,7 +20,8 @@ public slots:
         m_repository = std::make_unique<smartmate::model::persistence::SqliteTaskRepository>(
             QStringLiteral(":memory:"));
         m_service = std::make_unique<smartmate::model::TaskService>(
-            *m_repository, *m_repository, *m_repository, *m_repository);
+            *m_repository, *m_repository, *m_repository, *m_repository,
+            *m_repository);
         m_appViewModel =
             std::make_unique<smartmate::viewmodel::AppViewModel>(*m_service);
     }

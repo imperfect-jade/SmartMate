@@ -2,6 +2,7 @@
 
 #include "domain/TaskCreationRequest.h"
 #include "domain/TaskStateMachine.h"
+#include "repositories/ITaskBatchTransitionRepository.h"
 #include "repositories/ITaskCreationRepository.h"
 #include "repositories/ITaskDeletionRepository.h"
 #include "repositories/ITaskDependencyRepository.h"
@@ -20,6 +21,7 @@ public:
     TaskService(ITaskRepository &repository,
                 ITaskDependencyRepository &dependencyRepository,
                 ITaskCreationRepository &creationRepository,
+                ITaskBatchTransitionRepository &batchTransitionRepository,
                 ITaskDeletionRepository &deletionRepository,
                 QObject *parent = nullptr);
 
@@ -61,10 +63,17 @@ public:
     [[nodiscard]] TaskResult redoTask(const TaskId &id);
     /// 仅将 Done/Cancelled 软归档，不做物理删除。
     [[nodiscard]] TaskResult archiveTask(const TaskId &id);
+    /// 原子归档全部 Done/Cancelled 任务；任一目标不合格时整批不写入。
+    [[nodiscard]] TaskBatchResult archiveTasks(const QList<TaskId> &taskIds);
     /// 恢复正常归档前状态；旧 Todo/InProgress 恢复点统一安全降级为 Todo。
     [[nodiscard]] TaskResult restoreTask(const TaskId &id);
+    /// 原子恢复全部归档任务，并基于最终假想快照统一校验依赖一致性。
+    [[nodiscard]] TaskBatchResult restoreTasks(const QList<TaskId> &taskIds);
     /// 永久删除归档任务及全部关联依赖；该操作不可撤销。
     [[nodiscard]] TaskResult deleteArchivedTask(const TaskId &id);
+    /// 原子永久删除全部归档任务及其入边、出边；任一目标不合格时整批回滚。
+    [[nodiscard]] TaskBatchResult deleteArchivedTasks(
+        const QList<TaskId> &taskIds);
 
 signals:
     /// 仅在一次实际写入成功后发出；失败或无写入的幂等操作不会通知。
@@ -76,12 +85,18 @@ private:
     /// 复用唯一状态机执行转换，并确保一次成功命令只写入和通知一次。
     [[nodiscard]] TaskResult applyTransition(const TaskId &id,
                                              TaskTransition transition);
+    /// 归档与恢复共用整批校验和原子写入；单项命令也必须经过此路径。
+    [[nodiscard]] TaskBatchResult applyBatchTransition(
+        const QList<TaskId> &taskIds,
+        TaskTransition transition);
 
     // 非拥有引用，其生命周期必须长于 TaskService。
     ITaskRepository &m_repository;
     ITaskDependencyRepository &m_dependencyRepository;
     /// 独立命令端口保证跨 tasks 与 task_dependencies 的写入具有事务边界。
     ITaskCreationRepository &m_creationRepository;
+    /// 批量状态端口以条件更新防御Service预检后的并发变化，并保证整批原子发布。
+    ITaskBatchTransitionRepository &m_batchTransitionRepository;
     /// 永久删除端口保证任务与全部入边、出边在同一事务内移除。
     ITaskDeletionRepository &m_deletionRepository;
 };

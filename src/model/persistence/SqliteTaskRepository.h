@@ -1,5 +1,6 @@
 #pragma once
 
+#include "repositories/ITaskBatchTransitionRepository.h"
 #include "repositories/ITaskCreationRepository.h"
 #include "repositories/ITaskDeletionRepository.h"
 #include "repositories/ITaskDependencyRepository.h"
@@ -13,6 +14,7 @@ namespace smartmate::model::persistence {
 class SqliteTaskRepository final : public ITaskRepository,
                                    public ITaskDependencyRepository,
                                    public ITaskCreationRepository,
+                                   public ITaskBatchTransitionRepository,
                                    public ITaskDeletionRepository {
 public:
     explicit SqliteTaskRepository(QString databasePath);
@@ -34,9 +36,12 @@ public:
     void insertTaskWithPredecessors(
         const Task &task,
         const QList<TaskId> &predecessorIds) override;
+    /// 在一个事务内批量更新状态；任一预期状态不匹配时整批回滚。
+    [[nodiscard]] TaskBatchWriteResult updateTaskStatesAtomically(
+        const QList<TaskStateChange> &changes) override;
     /// 在一个事务内永久删除归档任务及其全部入边、出边。
-    [[nodiscard]] TaskDeletionWriteResult
-    deleteArchivedTaskWithDependencies(const TaskId &taskId) override;
+    [[nodiscard]] TaskDeletionWriteResult deleteArchivedTasksWithDependencies(
+        const QList<TaskId> &taskIds) override;
 
 private:
     void configureConnection(bool inMemory);

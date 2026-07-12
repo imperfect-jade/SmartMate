@@ -6,7 +6,7 @@ void TaskViewModelsTest::editorCreatesACompleteTypedDraft()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     const QTimeZone timeZone = QTimeZone::fromSecondsAheadOfUtc(8 * 60 * 60);
     TaskEditorViewModel editor{service, timeZone};
 
@@ -64,7 +64,7 @@ void TaskViewModelsTest::editorCancelLeavesTheStoredTaskUnchanged()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
 
     QVERIFY(editor.beginEdit(stored.id().toString(QUuid::WithoutBraces)));
@@ -85,7 +85,7 @@ void TaskViewModelsTest::editorRejectsInvalidSelectionsAndMapsServiceErrors()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
 
     editor.beginCreate();
@@ -121,7 +121,7 @@ void TaskViewModelsTest::editorSupportsDurationBoundariesAndClear()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
 
     editor.beginCreate();
@@ -166,7 +166,7 @@ void TaskViewModelsTest::editorConvertsInjectedTimeZoneAndRejectsDstTransitions(
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service, newYork};
     editor.beginCreate();
     editor.setTitle(QStringLiteral("DST-safe deadline"));
@@ -208,7 +208,7 @@ void TaskViewModelsTest::editorPreservesUnchangedDeadlinePrecision()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service, QTimeZone{QTimeZone::UTC}};
 
     QVERIFY(editor.beginEdit(stored.id().toString(QUuid::WithoutBraces)));
@@ -234,7 +234,7 @@ void TaskViewModelsTest::editorRejectsSaveWhenNothingChanged()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     QSignalSpy savedSpy{&editor, &TaskEditorViewModel::saved};
@@ -260,7 +260,7 @@ void TaskViewModelsTest::editorSuccessfullyUpdatesAStoredTask()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     const QTimeZone timeZone = QTimeZone::fromSecondsAheadOfUtc(8 * 60 * 60);
     TaskEditorViewModel editor{service, timeZone};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
@@ -304,7 +304,7 @@ void TaskViewModelsTest::editorRejectsStaleDraftAfterTaskLeavesTodo()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     QSignalSpy savedSpy{&editor, &TaskEditorViewModel::saved};
@@ -346,7 +346,7 @@ void TaskViewModelsTest::editorCreationPredecessorPickerUsesIsolatedCheckpoints(
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
 
     QVERIFY(editor.beginCreate());
@@ -396,7 +396,7 @@ void TaskViewModelsTest::editorAtomicCreationFailurePreservesTheWholeDraft()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskEditorViewModel editor{service};
     QSignalSpy savedSpy{&editor, &TaskEditorViewModel::saved};
 

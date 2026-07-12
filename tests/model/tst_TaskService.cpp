@@ -1,6 +1,7 @@
 #include "fakes/FakeTaskRepository.h"
 #include "fakes/FakeTaskDependencyRepository.h"
 #include "fakes/FakeTaskCreationRepository.h"
+#include "fakes/FakeTaskBatchTransitionRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
 
 #include "domain/Task.h"
@@ -26,6 +27,7 @@ using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::tests::FakeTaskCreationRepository;
+using smartmate::tests::FakeTaskBatchTransitionRepository;
 using smartmate::tests::FakeTaskDeletionRepository;
 using smartmate::tests::FakeTaskRepository;
 
@@ -98,6 +100,10 @@ private slots:
     void rejectsEditingNonTodoTasks();
     void permanentlyDeletesOnlyArchivedTasks();
     void mapsPermanentDeletionFailuresWithoutSignals();
+    void rejectsEmptyAndInvalidBatchSelectionsWithoutWriting();
+    void archivesAndRestoresBatchesAtomically();
+    void aggregatesBatchRestoreDependencyFailures();
+    void permanentlyDeletesArchivedBatchAndSharedEdgesOnce();
     void archivesAndRestoresTerminalStatuses();
     void restoresLegacyArchiveWithoutInProgressConflict();
     void reportsInvalidOperationsAndMissingTasks();
@@ -120,8 +126,9 @@ void TaskServiceTest::listsAndFindsTasks()
     FakeTaskRepository repository{{first, second}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
 
     const auto listResult = service.listTasks();
     QVERIFY(listResult.ok());
@@ -139,8 +146,9 @@ void TaskServiceTest::createsTaskWithEveryField()
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
     const QDateTime localDeadline =
@@ -183,8 +191,9 @@ void TaskServiceTest::createsTaskAndPredecessorsAtomically()
     FakeTaskRepository repository{{first, second}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
 
@@ -213,8 +222,9 @@ void TaskServiceTest::rejectsInvalidCreationPredecessorsWithoutWriting()
     FakeTaskRepository repository{{active, archived, cancelled}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
 
@@ -249,8 +259,9 @@ void TaskServiceTest::rollsBackAtomicCreationFailureWithoutSignals()
     FakeTaskDependencyRepository dependencyRepository;
     dependencyRepository.setWriteFailure(true);
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
 
@@ -275,8 +286,9 @@ void TaskServiceTest::listsEligibleCreationPredecessors()
     FakeTaskRepository repository{{archived, cancelled, todo, done, inProgress}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
 
     const auto result = service.listEligibleCreationPredecessors();
 
@@ -298,8 +310,9 @@ void TaskServiceTest::normalizesOmittedDescriptionToEmptyText()
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     TaskDraft draft;
     draft.title = QStringLiteral("只填写标题");
     // 模拟旧调用方或未触碰描述输入框时传入的 null QString。
@@ -320,8 +333,9 @@ void TaskServiceTest::validatesDraftWithoutRepositoryAccess()
     repository.setWriteFailure(true);
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     TaskDraft draft = validDraft();
@@ -353,8 +367,9 @@ void TaskServiceTest::validatesDraftFields()
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto expectError = [&service](TaskDraft draft, TaskError expected) {
@@ -400,8 +415,9 @@ void TaskServiceTest::acceptsDeadlineAndEstimateBoundaries()
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
     TaskDraft draft = validDraft();
 
     // 截止时间表达约束而不是输入格式约束，因此过去的有效时刻仍可保存。
@@ -432,8 +448,10 @@ void TaskServiceTest::createsEveryPriorityAsTodo()
         FakeTaskDependencyRepository dependencyRepository;
         FakeTaskCreationRepository creationRepository{repository,
                                                        dependencyRepository};
+        FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
         TaskService service{repository, dependencyRepository,
-                            creationRepository, deletionRepository};
+                            creationRepository, batchTransitionRepository,
+                            deletionRepository};
         TaskDraft draft = validDraft();
         draft.priority = priority;
 
@@ -453,8 +471,9 @@ void TaskServiceTest::startEnforcesSingleInProgressTask()
     FakeTaskRepository repository{{active, todo}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto startResult = service.startTask(todo.id());
@@ -472,8 +491,9 @@ void TaskServiceTest::mapsConcurrentCreationFailureWithoutInventingStatusConflic
     repository.setCompetingTaskOnNextWrite(storedTask(TaskStatus::InProgress));
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     TaskDraft draft = validDraft();
 
@@ -492,8 +512,9 @@ void TaskServiceTest::mapsConcurrentInProgressStartConflict()
     repository.setCompetingTaskOnNextWrite(storedTask(TaskStatus::InProgress));
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     const auto result = service.startTask(target.id());
 
@@ -510,8 +531,9 @@ void TaskServiceTest::restoresLegacyInProgressArchiveAsTodo()
     FakeTaskRepository repository{{archived, active}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto result = service.restoreTask(archived.id());
@@ -529,8 +551,9 @@ void TaskServiceTest::updatesTaskAndPreservesIdentity()
     FakeTaskRepository repository{{original}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     TaskDraft draft;
@@ -578,8 +601,9 @@ void TaskServiceTest::rejectsEditingNonTodoTasks()
         FakeTaskDependencyRepository dependencyRepository;
         FakeTaskCreationRepository creationRepository{repository,
                                                        dependencyRepository};
+        FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
         TaskService service{repository, dependencyRepository, creationRepository,
-                            deletionRepository};
+                            batchTransitionRepository, deletionRepository};
         QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
         TaskDraft draft = draftFor(candidate);
         draft.title = QStringLiteral("尝试修改普通字段");
@@ -607,8 +631,9 @@ void TaskServiceTest::rejectsEditingNonTodoTasks()
     FakeTaskDependencyRepository staleDependencies;
     FakeTaskCreationRepository staleCreation{staleRepository,
                                               staleDependencies};
+    FakeTaskBatchTransitionRepository staleBatchTransition{staleRepository};
     TaskService staleService{staleRepository, staleDependencies, staleCreation,
-                             deletionRepository};
+                             staleBatchTransition, deletionRepository};
     QVERIFY(staleService.findEditableTask(openedTodo.id()).ok());
     QVERIFY(staleService.startTask(openedTodo.id()).ok());
     const int writesBeforeSave = staleRepository.updateCount();
@@ -637,10 +662,11 @@ void TaskServiceTest::permanentlyDeletesOnlyArchivedTasks()
          {first.id(), second.id()}}};
     FakeTaskCreationRepository creationRepository{repository,
                                                    dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     FakeTaskDeletionRepository boundDeletionRepository{repository,
                                                        dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        boundDeletionRepository};
+                        batchTransitionRepository, boundDeletionRepository};
     QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
 
@@ -668,10 +694,12 @@ void TaskServiceTest::permanentlyDeletesOnlyArchivedTasks()
         FakeTaskDependencyRepository activeDependencies;
         FakeTaskCreationRepository activeCreation{activeRepository,
                                                    activeDependencies};
+        FakeTaskBatchTransitionRepository activeBatchTransition{activeRepository};
         FakeTaskDeletionRepository activeDeletion{activeRepository,
                                                    activeDependencies};
         TaskService activeService{activeRepository, activeDependencies,
-                                  activeCreation, activeDeletion};
+                                  activeCreation, activeBatchTransition,
+                                  activeDeletion};
         QSignalSpy activeTaskSpy{&activeService, &TaskService::tasksChanged};
 
         const auto rejected = activeService.deleteArchivedTask(active.id());
@@ -687,10 +715,12 @@ void TaskServiceTest::permanentlyDeletesOnlyArchivedTasks()
     FakeTaskDependencyRepository noEdgeDependencies;
     FakeTaskCreationRepository noEdgeCreation{noEdgeRepository,
                                               noEdgeDependencies};
+    FakeTaskBatchTransitionRepository noEdgeBatchTransition{noEdgeRepository};
     FakeTaskDeletionRepository noEdgeDeletion{noEdgeRepository,
                                               noEdgeDependencies};
     TaskService noEdgeService{noEdgeRepository, noEdgeDependencies,
-                              noEdgeCreation, noEdgeDeletion};
+                              noEdgeCreation, noEdgeBatchTransition,
+                              noEdgeDeletion};
     QSignalSpy noEdgeTaskSpy{&noEdgeService, &TaskService::tasksChanged};
     QSignalSpy noEdgeDependencySpy{&noEdgeService,
                                    &TaskService::dependenciesChanged};
@@ -708,9 +738,10 @@ void TaskServiceTest::mapsPermanentDeletionFailuresWithoutSignals()
                                                    dependencyRepository};
     FakeTaskDeletionRepository deletionFailure{repository,
                                                 dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     deletionFailure.setWriteFailure(true);
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionFailure};
+                        batchTransitionRepository, deletionFailure};
     QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
 
@@ -730,6 +761,207 @@ void TaskServiceTest::mapsPermanentDeletionFailuresWithoutSignals()
     QCOMPARE(missing.error, TaskError::NotFound);
     QCOMPARE(deletionFailure.deletedTaskIds().size(), 1);
     QCOMPARE(taskSpy.count(), 0);
+
+    // 条件删除回滚后重读：预检后被另一实例删除必须报告NotFound，而非状态不允许。
+    const Task disappeared = storedTask(TaskStatus::Archived, TaskStatus::Done);
+    FakeTaskRepository disappearedRepository{{disappeared}};
+    FakeTaskDependencyRepository disappearedDependencies;
+    FakeTaskCreationRepository disappearedCreation{disappearedRepository,
+                                                     disappearedDependencies};
+    FakeTaskBatchTransitionRepository disappearedTransitions{
+        disappearedRepository};
+    FakeTaskDeletionRepository disappearedDeletion{disappearedRepository,
+                                                    disappearedDependencies};
+    disappearedDeletion.setMissingConflictOnNextWrite(true);
+    TaskService disappearedService{disappearedRepository,
+                                   disappearedDependencies,
+                                   disappearedCreation,
+                                   disappearedTransitions,
+                                   disappearedDeletion};
+    QSignalSpy disappearedTaskSpy{&disappearedService,
+                                  &TaskService::tasksChanged};
+
+    const auto disappearedResult =
+        disappearedService.deleteArchivedTask(disappeared.id());
+    QCOMPARE(disappearedResult.error, TaskError::NotFound);
+    QCOMPARE(disappearedResult.context.conflictingTaskIds,
+             QList<TaskId>{disappeared.id()});
+    QCOMPARE(disappearedTaskSpy.count(), 0);
+}
+
+void TaskServiceTest::rejectsEmptyAndInvalidBatchSelectionsWithoutWriting()
+{
+    const Task done = storedTask(TaskStatus::Done);
+    const Task todo = storedTask(TaskStatus::Todo);
+    FakeTaskRepository repository{{done, todo}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository,
+                                                   dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
+    FakeTaskDeletionRepository batchDeletionRepository{repository,
+                                                       dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchTransitionRepository, batchDeletionRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+
+    QCOMPARE(service.archiveTasks({}).error, TaskError::EmptyTaskSelection);
+    QCOMPARE(service.restoreTasks({}).error, TaskError::EmptyTaskSelection);
+    QCOMPARE(service.deleteArchivedTasks({}).error,
+             TaskError::EmptyTaskSelection);
+
+    const auto invalid = service.archiveTasks({done.id(), todo.id()});
+    QCOMPARE(invalid.error, TaskError::InvalidTaskTransition);
+    QCOMPARE(invalid.context.conflictingTaskIds, QList<TaskId>{todo.id()});
+
+    const TaskId missingId = QUuid::createUuid();
+    const auto missing = service.archiveTasks({done.id(), missingId});
+    QCOMPARE(missing.error, TaskError::NotFound);
+    QCOMPARE(missing.context.conflictingTaskIds, QList<TaskId>{missingId});
+    QCOMPARE(batchTransitionRepository.callCount(), 0);
+    QVERIFY(batchDeletionRepository.deletedTaskIds().isEmpty());
+    QCOMPARE(repository.tasks(), QList<Task>({done, todo}));
+    QCOMPARE(taskSpy.count(), 0);
+
+    batchTransitionRepository.setResult({0, {done.id()}});
+    const auto concurrent = service.archiveTasks({done.id()});
+    QCOMPARE(concurrent.error, TaskError::InvalidTaskTransition);
+    QCOMPARE(concurrent.context.conflictingTaskIds, QList<TaskId>{done.id()});
+    QCOMPARE(repository.tasks(), QList<Task>({done, todo}));
+    QCOMPARE(taskSpy.count(), 0);
+}
+
+void TaskServiceTest::archivesAndRestoresBatchesAtomically()
+{
+    const Task done = storedTask(TaskStatus::Done);
+    const Task cancelled = storedTask(TaskStatus::Cancelled);
+    FakeTaskRepository repository{{done, cancelled}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository,
+                                                   dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
+    FakeTaskDeletionRepository batchDeletionRepository{repository,
+                                                       dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchTransitionRepository, batchDeletionRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+
+    const auto archived = service.archiveTasks(
+        {cancelled.id(), done.id(), cancelled.id()});
+    QVERIFY(archived.ok());
+    QCOMPARE(archived.value->tasks.size(), 2);
+    QVERIFY(archived.value->tasks.at(0).id().toString(QUuid::WithoutBraces)
+            < archived.value->tasks.at(1).id().toString(QUuid::WithoutBraces));
+    QCOMPARE(batchTransitionRepository.callCount(), 1);
+    QCOMPARE(batchTransitionRepository.lastChanges().size(), 2);
+    QCOMPARE(batchTransitionRepository.lastChanges().at(0).updatedAtUtc,
+             batchTransitionRepository.lastChanges().at(1).updatedAtUtc);
+    QCOMPARE(taskSpy.count(), 1);
+    for (const Task &task : archived.value->tasks) {
+        QCOMPARE(task.status(), TaskStatus::Archived);
+        const TaskStatus expectedBefore = task.id() == done.id()
+            ? TaskStatus::Done
+            : TaskStatus::Cancelled;
+        QCOMPARE(task.statusBeforeArchive(),
+                 std::optional<TaskStatus>{expectedBefore});
+    }
+
+    const auto restored = service.restoreTasks({done.id(), cancelled.id()});
+    QVERIFY(restored.ok());
+    QCOMPARE(restored.value->tasks.size(), 2);
+    QCOMPARE(taskSpy.count(), 2);
+    QCOMPARE(repository.findById(done.id())->status(), TaskStatus::Done);
+    QCOMPARE(repository.findById(cancelled.id())->status(),
+             TaskStatus::Cancelled);
+
+    const Task legacy = storedTask(TaskStatus::Archived,
+                                   TaskStatus::InProgress);
+    FakeTaskRepository legacyRepository{{legacy}};
+    FakeTaskDependencyRepository legacyDependencies;
+    FakeTaskCreationRepository legacyCreation{legacyRepository,
+                                               legacyDependencies};
+    FakeTaskBatchTransitionRepository legacyBatch{legacyRepository};
+    FakeTaskDeletionRepository legacyDeletion{legacyRepository,
+                                              legacyDependencies};
+    TaskService legacyService{legacyRepository, legacyDependencies,
+                              legacyCreation, legacyBatch, legacyDeletion};
+    const auto legacyRestore = legacyService.restoreTasks({legacy.id()});
+    QVERIFY(legacyRestore.ok());
+    QCOMPARE(legacyRestore.value->tasks.constFirst().status(), TaskStatus::Todo);
+}
+
+void TaskServiceTest::aggregatesBatchRestoreDependencyFailures()
+{
+    const Task firstPredecessor = storedTask(TaskStatus::Todo);
+    const Task secondPredecessor = storedTask(TaskStatus::Todo);
+    const Task firstBlocked = storedTask(TaskStatus::Archived, TaskStatus::Done);
+    const Task secondBlocked = storedTask(TaskStatus::Archived, TaskStatus::Done);
+    FakeTaskRepository repository{
+        {firstPredecessor, secondPredecessor, firstBlocked, secondBlocked}};
+    FakeTaskDependencyRepository dependencyRepository{
+        {{firstPredecessor.id(), firstBlocked.id()},
+         {secondPredecessor.id(), secondBlocked.id()}}};
+    FakeTaskCreationRepository creationRepository{repository,
+                                                   dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
+    FakeTaskDeletionRepository deletionRepository{repository,
+                                                  dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchTransitionRepository, deletionRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+
+    const auto result = service.restoreTasks(
+        {secondBlocked.id(), firstBlocked.id()});
+    QCOMPARE(result.error, TaskError::TaskBlocked);
+    QCOMPARE(result.context.blockingTaskIds.size(), 2);
+    QVERIFY(result.context.blockingTaskIds.contains(firstPredecessor.id()));
+    QVERIFY(result.context.blockingTaskIds.contains(secondPredecessor.id()));
+    QCOMPARE(result.context.conflictingTaskIds.size(), 2);
+    QVERIFY(result.context.conflictingTaskIds.contains(firstBlocked.id()));
+    QVERIFY(result.context.conflictingTaskIds.contains(secondBlocked.id()));
+    QCOMPARE(batchTransitionRepository.callCount(), 0);
+    QCOMPARE(taskSpy.count(), 0);
+}
+
+void TaskServiceTest::permanentlyDeletesArchivedBatchAndSharedEdgesOnce()
+{
+    const Task retainedA = storedTask(TaskStatus::Todo);
+    const Task archivedA = storedTask(TaskStatus::Archived, TaskStatus::Done);
+    const Task archivedB = storedTask(TaskStatus::Archived,
+                                      TaskStatus::Cancelled);
+    const Task retainedB = storedTask(TaskStatus::Todo);
+    FakeTaskRepository repository{{retainedA, archivedA, archivedB, retainedB}};
+    FakeTaskDependencyRepository dependencyRepository{
+        {{retainedA.id(), archivedA.id()},
+         {archivedA.id(), archivedB.id()},
+         {archivedB.id(), retainedB.id()},
+         {retainedA.id(), retainedB.id()}}};
+    FakeTaskCreationRepository creationRepository{repository,
+                                                   dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
+    FakeTaskDeletionRepository deletionRepository{repository,
+                                                  dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchTransitionRepository, deletionRepository};
+    QSignalSpy taskSpy{&service, &TaskService::tasksChanged};
+    QSignalSpy dependencySpy{&service, &TaskService::dependenciesChanged};
+
+    const auto result = service.deleteArchivedTasks(
+        {archivedB.id(), archivedA.id(), archivedA.id()});
+    QVERIFY(result.ok());
+    QCOMPARE(result.value->tasks.size(), 2);
+    QCOMPARE(result.value->removedDependencyCount, 3);
+    QVERIFY(!repository.findById(archivedA.id()).has_value());
+    QVERIFY(!repository.findById(archivedB.id()).has_value());
+    QCOMPARE(repository.tasks(), QList<Task>({retainedA, retainedB}));
+    QCOMPARE(dependencyRepository.dependencies(),
+             QList<smartmate::model::TaskDependency>(
+                 {{retainedA.id(), retainedB.id()}}));
+    QCOMPARE(taskSpy.count(), 1);
+    QCOMPARE(dependencySpy.count(), 1);
+
+    const auto invalid = service.deleteArchivedTasks({retainedA.id()});
+    QCOMPARE(invalid.error, TaskError::TaskDeletionNotAllowed);
+    QCOMPARE(taskSpy.count(), 1);
 }
 
 void TaskServiceTest::archivesAndRestoresTerminalStatuses()
@@ -739,8 +971,9 @@ void TaskServiceTest::archivesAndRestoresTerminalStatuses()
         FakeTaskRepository repository{{original}};
         FakeTaskDependencyRepository dependencyRepository;
         FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+        FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
         TaskService service{repository, dependencyRepository, creationRepository,
-                            deletionRepository};
+                            batchTransitionRepository, deletionRepository};
         QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
         const auto archiveResult = service.archiveTask(original.id());
@@ -764,8 +997,9 @@ void TaskServiceTest::restoresLegacyArchiveWithoutInProgressConflict()
     FakeTaskRepository repository{{archived, active}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     const auto result = service.restoreTask(archived.id());
@@ -783,8 +1017,9 @@ void TaskServiceTest::reportsInvalidOperationsAndMissingTasks()
     FakeTaskRepository repository{{todo}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     const QUuid missingId = QUuid::createUuid();
 
@@ -802,8 +1037,9 @@ void TaskServiceTest::mapsRepositoryFailures()
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
 
     repository.setReadFailure(true);
@@ -836,8 +1072,9 @@ void TaskServiceTest::replacesDependenciesAndReportsStructuredErrors()
         {predecessor, target, archived, completed, cancelled}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::dependenciesChanged};
 
     QVERIFY(service.listDependencies().ok());
@@ -908,8 +1145,9 @@ void TaskServiceTest::replacesDependenciesAndReportsStructuredErrors()
     FakeTaskDependencyRepository legacyDependencies{
         {{archived.id(), target.id()}, {cancelled.id(), target.id()}}};
     FakeTaskCreationRepository legacyCreation{repository, legacyDependencies};
+    FakeTaskBatchTransitionRepository legacyBatchTransition{repository};
     TaskService legacyService{repository, legacyDependencies, legacyCreation,
-                              deletionRepository};
+                              legacyBatchTransition, deletionRepository};
     QSignalSpy legacyChangedSpy{&legacyService, &TaskService::dependenciesChanged};
     const auto retainArchived = legacyService.replaceTaskPredecessors(
         target.id(), {archived.id(), cancelled.id(), predecessor.id()});
@@ -933,8 +1171,9 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
     FakeTaskDependencyRepository dependencyRepository{
         {{predecessor.id(), target.id()}}};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
 
     const auto startBlocked = service.startTask(target.id());
     QCOMPARE(startBlocked.error, TaskError::TaskBlocked);
@@ -955,8 +1194,10 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
         {{completedPredecessor.id(), activeSuccessor.id()}}};
     FakeTaskCreationRepository activeCreation{activeRepository,
                                               activeDependencies};
+    FakeTaskBatchTransitionRepository activeBatchTransition{activeRepository};
     TaskService activeService{activeRepository, activeDependencies,
-                              activeCreation, deletionRepository};
+                              activeCreation, activeBatchTransition,
+                              deletionRepository};
 
     const auto invalidateActive = activeService.redoTask(completedPredecessor.id());
     QCOMPARE(invalidateActive.error, TaskError::DependencyStateConflict);
@@ -976,9 +1217,12 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
         {{completedPredecessor.id(), archivedCompletedSuccessor.id()}}};
     FakeTaskCreationRepository archivedSuccessorCreation{
         archivedSuccessorRepository, archivedSuccessorDependencies};
+    FakeTaskBatchTransitionRepository archivedSuccessorBatchTransition{
+        archivedSuccessorRepository};
     TaskService archivedSuccessorService{
         archivedSuccessorRepository, archivedSuccessorDependencies,
-        archivedSuccessorCreation, deletionRepository};
+        archivedSuccessorCreation, archivedSuccessorBatchTransition,
+        deletionRepository};
     QCOMPARE(archivedSuccessorService.redoTask(completedPredecessor.id()).error,
              TaskError::DependencyStateConflict);
 
@@ -991,8 +1235,9 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
     FakeTaskDependencyRepository readyDependencies{
         {{archivedCompletedPredecessor.id(), readyTarget.id()}}};
     FakeTaskCreationRepository readyCreation{readyRepository, readyDependencies};
+    FakeTaskBatchTransitionRepository readyBatchTransition{readyRepository};
     TaskService readyService{readyRepository, readyDependencies, readyCreation,
-                             deletionRepository};
+                             readyBatchTransition, deletionRepository};
     QVERIFY(readyService.startTask(readyTarget.id()).ok());
 
     const Task archivedActiveTarget = storedTask(
@@ -1003,8 +1248,10 @@ void TaskServiceTest::enforcesDependencyStatusConsistency()
         {{predecessor.id(), archivedActiveTarget.id()}}};
     FakeTaskCreationRepository restoreCreation{restoreRepository,
                                                restoreDependencies};
+    FakeTaskBatchTransitionRepository restoreBatchTransition{restoreRepository};
     TaskService restoreService{restoreRepository, restoreDependencies,
-                               restoreCreation, deletionRepository};
+                               restoreCreation, restoreBatchTransition,
+                               deletionRepository};
     const auto restoreBlocked = restoreService.restoreTask(archivedActiveTarget.id());
     QVERIFY(restoreBlocked.ok());
     QCOMPARE(restoreBlocked.value->status(), TaskStatus::Todo);
@@ -1019,8 +1266,9 @@ void TaskServiceTest::mapsDependencyRepositoryFailures()
     FakeTaskRepository repository{{predecessor, target}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionRepository, deletionRepository};
     QSignalSpy changedSpy{&service, &TaskService::dependenciesChanged};
 
     dependencyRepository.setReadFailure(true);
@@ -1059,8 +1307,9 @@ void TaskServiceTest::buildsGraphSnapshotWithArchivedClosure()
         {{root.id(), connectedArchived.id()},
          {archivedCompleted.id(), root.id()}}};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
 
     const auto result = service.taskGraphSnapshot();
 
@@ -1130,8 +1379,9 @@ void TaskServiceTest::buildsDependencyEditContextInModel()
         {{existingCancelled.id(), target.id()},
          {existingArchived.id(), target.id()}}};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
 
     const auto result = service.taskDependencyEditContext(target.id());
 
@@ -1168,8 +1418,9 @@ void TaskServiceTest::rejectsDependencyEditContextForNonTodoTarget()
     FakeTaskRepository repository{{target}};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
 
     const auto result = service.taskDependencyEditContext(target.id());
 
@@ -1185,8 +1436,9 @@ void TaskServiceTest::keepsPlanAndGraphCommandAvailabilityConsistent()
     FakeTaskDependencyRepository dependencyRepository{
         {{predecessor.id(), target.id()}}};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     const TaskService service{repository, dependencyRepository, creationRepository,
-                              deletionRepository};
+                              batchTransitionRepository, deletionRepository};
 
     const auto plan = service.listRecommendedTasks();
     const auto graph = service.taskGraphSnapshot();

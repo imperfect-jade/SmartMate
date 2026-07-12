@@ -15,6 +15,7 @@ using smartmate::model::RepositoryException;
 using smartmate::model::Task;
 using smartmate::model::TaskDependency;
 using smartmate::model::TaskPriority;
+using smartmate::model::TaskStateChange;
 using smartmate::model::TaskStatus;
 using smartmate::model::persistence::SqliteTaskRepository;
 
@@ -150,10 +151,10 @@ void createVersionOneDatabase(const QString &databasePath, const Task &task)
 
 [[nodiscard]] bool permanentDeletionThrows(
     SqliteTaskRepository &repository,
-    const QUuid &taskId)
+    const QList<QUuid> &taskIds)
 {
     try {
-        (void) repository.deleteArchivedTaskWithDependencies(taskId);
+        (void) repository.deleteArchivedTasksWithDependencies(taskIds);
     } catch (const RepositoryException &) {
         return true;
     }
@@ -185,6 +186,8 @@ private slots:
     void atomicallyCreatesTaskWithPredecessorsAcrossReopen();
     void atomicCreationRollsBackTaskAfterMidwayEdgeFailure();
     void atomicCreationRollsBackOnTaskOrSelfDependencyConstraint();
+    void batchStateChangesCommitAcrossReopen();
+    void batchStateChangesRollBackOnConflictOrSqlFailure();
     void permanentlyDeletesArchivedTaskAndAllDependenciesAcrossReopen();
     void rejectsPermanentDeletionOfActiveOrMissingTaskAtomically();
     void permanentDeletionRollsBackAfterTaskDeleteFailure();
@@ -737,6 +740,137 @@ void SqliteTaskRepositoryTest::atomicCreationRollsBackOnTaskOrSelfDependencyCons
     QVERIFY(repository.findAllDependencies().isEmpty());
 }
 
+void SqliteTaskRepositoryTest::batchStateChangesCommitAcrossReopen()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    const QUuid doneId = QUuid::createUuid();
+    const QUuid cancelledId = QUuid::createUuid();
+    const QDateTime batchUpdatedAt = kUpdatedAt.addSecs(90);
+    const QDateTime restoredAt = kUpdatedAt.addSecs(180);
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        repository.insert(makeTask(doneId, QStringLiteral("批量归档完成任务"),
+                                   TaskPriority::Normal, TaskStatus::Done));
+        repository.insert(makeTask(cancelledId, QStringLiteral("批量归档取消任务"),
+                                   TaskPriority::Normal, TaskStatus::Cancelled));
+
+        const auto result = repository.updateTaskStatesAtomically({
+            TaskStateChange{doneId, TaskStatus::Done, TaskStatus::Archived,
+                            TaskStatus::Done, batchUpdatedAt},
+            TaskStateChange{cancelledId, TaskStatus::Cancelled,
+                            TaskStatus::Archived, TaskStatus::Cancelled,
+                            batchUpdatedAt},
+        });
+        QCOMPARE(result.updatedTaskCount, 2);
+        QVERIFY(result.conflictingTaskIds.isEmpty());
+    }
+
+    // 重开数据库验证批量事务的状态、归档前状态与统一更新时间已共同提交。
+    {
+        SqliteTaskRepository repository(databasePath);
+        const auto done = repository.findById(doneId);
+        const auto cancelled = repository.findById(cancelledId);
+        QVERIFY(done.has_value());
+        QVERIFY(cancelled.has_value());
+        QCOMPARE(done->status(), TaskStatus::Archived);
+        QCOMPARE(done->statusBeforeArchive(),
+                 std::optional<TaskStatus>{TaskStatus::Done});
+        QCOMPARE(done->updatedAtUtc(), batchUpdatedAt);
+        QCOMPARE(cancelled->status(), TaskStatus::Archived);
+        QCOMPARE(cancelled->statusBeforeArchive(),
+                 std::optional<TaskStatus>{TaskStatus::Cancelled});
+        QCOMPARE(cancelled->updatedAtUtc(), batchUpdatedAt);
+
+        const auto restored = repository.updateTaskStatesAtomically({
+            TaskStateChange{doneId, TaskStatus::Archived, TaskStatus::Done,
+                            std::nullopt, restoredAt},
+            TaskStateChange{cancelledId, TaskStatus::Archived,
+                            TaskStatus::Cancelled, std::nullopt, restoredAt},
+        });
+        QCOMPARE(restored.updatedTaskCount, 2);
+        QVERIFY(restored.conflictingTaskIds.isEmpty());
+    }
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        const auto done = repository.findById(doneId);
+        const auto cancelled = repository.findById(cancelledId);
+        QVERIFY(done.has_value());
+        QVERIFY(cancelled.has_value());
+        QCOMPARE(done->status(), TaskStatus::Done);
+        QVERIFY(!done->statusBeforeArchive().has_value());
+        QCOMPARE(done->updatedAtUtc(), restoredAt);
+        QCOMPARE(cancelled->status(), TaskStatus::Cancelled);
+        QVERIFY(!cancelled->statusBeforeArchive().has_value());
+        QCOMPARE(cancelled->updatedAtUtc(), restoredAt);
+    }
+}
+
+void SqliteTaskRepositoryTest::batchStateChangesRollBackOnConflictOrSqlFailure()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    const QUuid firstId = QUuid::createUuid();
+    const QUuid conflictId = QUuid::createUuid();
+    const QUuid triggerId = QUuid::createUuid();
+    SqliteTaskRepository repository(databasePath);
+    repository.insert(makeTask(firstId, QStringLiteral("事务首项"),
+                               TaskPriority::Normal, TaskStatus::Done));
+    repository.insert(makeTask(conflictId, QStringLiteral("状态竞争项"),
+                               TaskPriority::Normal, TaskStatus::Todo));
+    repository.insert(makeTask(triggerId, QStringLiteral("SQL失败项"),
+                               TaskPriority::Normal, TaskStatus::Done));
+
+    const auto conflictResult = repository.updateTaskStatesAtomically({
+        TaskStateChange{firstId, TaskStatus::Done, TaskStatus::Archived,
+                        TaskStatus::Done, kUpdatedAt.addSecs(60)},
+        TaskStateChange{conflictId, TaskStatus::Done, TaskStatus::Archived,
+                        TaskStatus::Done, kUpdatedAt.addSecs(60)},
+    });
+    QCOMPARE(conflictResult.updatedTaskCount, 0);
+    QCOMPARE(conflictResult.conflictingTaskIds, QList<QUuid>{conflictId});
+    QCOMPARE(repository.findById(firstId)->status(), TaskStatus::Done);
+    QCOMPARE(repository.findById(conflictId)->status(), TaskStatus::Todo);
+
+    const QString connectionName =
+        uniqueConnectionName(QStringLiteral("batch_update_failure_trigger"));
+    {
+        auto database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
+                                                  connectionName);
+        database.setDatabaseName(databasePath);
+        QVERIFY2(database.open(), qPrintable(database.lastError().text()));
+        QSqlQuery triggerQuery(database);
+        const QString statement = QStringLiteral(
+            "CREATE TRIGGER fail_batch_task_update "
+            "BEFORE UPDATE ON tasks WHEN OLD.id = '%1' "
+            "BEGIN SELECT RAISE(ABORT, 'simulated batch update failure'); END")
+                                      .arg(triggerId.toString(QUuid::WithoutBraces));
+        QVERIFY2(triggerQuery.exec(statement),
+                 qPrintable(triggerQuery.lastError().text()));
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    bool threw = false;
+    try {
+        (void) repository.updateTaskStatesAtomically({
+            TaskStateChange{firstId, TaskStatus::Done, TaskStatus::Archived,
+                            TaskStatus::Done, kUpdatedAt.addSecs(120)},
+            TaskStateChange{triggerId, TaskStatus::Done, TaskStatus::Archived,
+                            TaskStatus::Done, kUpdatedAt.addSecs(120)},
+        });
+    } catch (const RepositoryException &) {
+        threw = true;
+    }
+    QVERIFY(threw);
+    QCOMPARE(repository.findById(firstId)->status(), TaskStatus::Done);
+    QCOMPARE(repository.findById(triggerId)->status(), TaskStatus::Done);
+}
+
 void SqliteTaskRepositoryTest::permanentlyDeletesArchivedTaskAndAllDependenciesAcrossReopen()
 {
     QTemporaryDir directory;
@@ -744,6 +878,7 @@ void SqliteTaskRepositoryTest::permanentlyDeletesArchivedTaskAndAllDependenciesA
     const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
     const QUuid predecessor = QUuid::createUuid();
     const QUuid archivedId = QUuid::createUuid();
+    const QUuid secondArchivedId = QUuid::createUuid();
     const QUuid successor = QUuid::createUuid();
 
     {
@@ -753,15 +888,24 @@ void SqliteTaskRepositoryTest::permanentlyDeletesArchivedTaskAndAllDependenciesA
         repository.insert(makeTask(archivedId, QStringLiteral("永久删除目标"),
                                    TaskPriority::Normal, TaskStatus::Archived,
                                    TaskStatus::Done));
+        repository.insert(makeTask(secondArchivedId,
+                                   QStringLiteral("共享边的第二个删除目标"),
+                                   TaskPriority::Normal, TaskStatus::Archived,
+                                   TaskStatus::Cancelled));
         repository.insert(makeTask(successor, QStringLiteral("保留后继")));
         repository.replacePredecessors(archivedId, {predecessor});
-        repository.replacePredecessors(successor, {archivedId, predecessor});
+        repository.replacePredecessors(secondArchivedId, {archivedId});
+        repository.replacePredecessors(successor,
+                                       {secondArchivedId, predecessor});
 
         const auto result =
-            repository.deleteArchivedTaskWithDependencies(archivedId);
-        QVERIFY(result.taskDeleted);
-        QCOMPARE(result.removedDependencyCount, 2);
+            repository.deleteArchivedTasksWithDependencies(
+                {archivedId, secondArchivedId});
+        QCOMPARE(result.deletedTaskCount, 2);
+        QCOMPARE(result.removedDependencyCount, 3);
+        QVERIFY(result.conflictingTaskIds.isEmpty());
         QVERIFY(!repository.findById(archivedId).has_value());
+        QVERIFY(!repository.findById(secondArchivedId).has_value());
         QVERIFY(repository.findById(predecessor).has_value());
         QVERIFY(repository.findById(successor).has_value());
         QCOMPARE(repository.findAllDependencies(),
@@ -772,6 +916,7 @@ void SqliteTaskRepositoryTest::permanentlyDeletesArchivedTaskAndAllDependenciesA
     {
         SqliteTaskRepository repository(databasePath);
         QVERIFY(!repository.findById(archivedId).has_value());
+        QVERIFY(!repository.findById(secondArchivedId).has_value());
         QVERIFY(repository.findById(predecessor).has_value());
         QVERIFY(repository.findById(successor).has_value());
         QCOMPARE(repository.findAllDependencies(),
@@ -785,25 +930,42 @@ void SqliteTaskRepositoryTest::rejectsPermanentDeletionOfActiveOrMissingTaskAtom
     QVERIFY(directory.isValid());
     SqliteTaskRepository repository(directory.filePath(QStringLiteral("tasks.db")));
     const QUuid predecessor = QUuid::createUuid();
+    const QUuid archivedId = QUuid::createUuid();
     const QUuid activeId = QUuid::createUuid();
     repository.insert(makeTask(predecessor));
+    repository.insert(makeTask(archivedId, QStringLiteral("应随整批回滚的归档任务"),
+                               TaskPriority::Normal, TaskStatus::Archived,
+                               TaskStatus::Done));
     repository.insert(makeTask(activeId, QStringLiteral("仍是活动任务")));
-    repository.replacePredecessors(activeId, {predecessor});
+    repository.replacePredecessors(archivedId, {predecessor});
+    repository.replacePredecessors(activeId, {archivedId});
 
     const auto activeResult =
-        repository.deleteArchivedTaskWithDependencies(activeId);
-    QVERIFY(!activeResult.taskDeleted);
+        repository.deleteArchivedTasksWithDependencies({archivedId, activeId});
+    QCOMPARE(activeResult.deletedTaskCount, 0);
     QCOMPARE(activeResult.removedDependencyCount, 0);
+    QCOMPARE(activeResult.conflictingTaskIds, QList<QUuid>{activeId});
+    QVERIFY(repository.findById(archivedId).has_value());
     QVERIFY(repository.findById(activeId).has_value());
-    QCOMPARE(repository.findAllDependencies(),
-             QList<TaskDependency>({TaskDependency{predecessor, activeId}}));
+    const auto dependenciesAfterActiveConflict = repository.findAllDependencies();
+    QCOMPARE(dependenciesAfterActiveConflict.size(), 2);
+    QVERIFY(dependenciesAfterActiveConflict.contains(
+        TaskDependency{predecessor, archivedId}));
+    QVERIFY(dependenciesAfterActiveConflict.contains(
+        TaskDependency{archivedId, activeId}));
 
-    const auto missingResult = repository.deleteArchivedTaskWithDependencies(
-        QUuid::createUuid());
-    QVERIFY(!missingResult.taskDeleted);
+    const QUuid missingId = QUuid::createUuid();
+    const auto missingResult = repository.deleteArchivedTasksWithDependencies(
+        {missingId});
+    QCOMPARE(missingResult.deletedTaskCount, 0);
     QCOMPARE(missingResult.removedDependencyCount, 0);
-    QCOMPARE(repository.findAllDependencies(),
-             QList<TaskDependency>({TaskDependency{predecessor, activeId}}));
+    QCOMPARE(missingResult.conflictingTaskIds, QList<QUuid>{missingId});
+    const auto dependenciesAfterMissingConflict = repository.findAllDependencies();
+    QCOMPARE(dependenciesAfterMissingConflict.size(), 2);
+    QVERIFY(dependenciesAfterMissingConflict.contains(
+        TaskDependency{predecessor, archivedId}));
+    QVERIFY(dependenciesAfterMissingConflict.contains(
+        TaskDependency{archivedId, activeId}));
 }
 
 void SqliteTaskRepositoryTest::permanentDeletionRollsBackAfterTaskDeleteFailure()
@@ -812,13 +974,18 @@ void SqliteTaskRepositoryTest::permanentDeletionRollsBackAfterTaskDeleteFailure(
     QVERIFY(directory.isValid());
     const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
     const QUuid predecessor = QUuid::createUuid();
+    const QUuid firstArchivedId = QUuid::createUuid();
     const QUuid archivedId = QUuid::createUuid();
     SqliteTaskRepository repository(databasePath);
     repository.insert(makeTask(predecessor));
+    repository.insert(makeTask(firstArchivedId, QStringLiteral("触发失败前已删除项"),
+                               TaskPriority::Normal, TaskStatus::Archived,
+                               TaskStatus::Done));
     repository.insert(makeTask(archivedId, QStringLiteral("触发回滚的归档任务"),
                                TaskPriority::Normal, TaskStatus::Archived,
                                TaskStatus::Cancelled));
-    repository.replacePredecessors(archivedId, {predecessor});
+    repository.replacePredecessors(firstArchivedId, {predecessor});
+    repository.replacePredecessors(archivedId, {firstArchivedId});
 
     const QString connectionName =
         uniqueConnectionName(QStringLiteral("delete_failure_trigger"));
@@ -840,11 +1007,14 @@ void SqliteTaskRepositoryTest::permanentDeletionRollsBackAfterTaskDeleteFailure(
     QSqlDatabase::removeDatabase(connectionName);
 
     // 依赖DELETE已经执行后任务DELETE触发失败；事务必须恢复两张表。
-    QVERIFY(permanentDeletionThrows(repository, archivedId));
+    QVERIFY(permanentDeletionThrows(repository, {firstArchivedId, archivedId}));
+    QVERIFY(repository.findById(firstArchivedId).has_value());
     QVERIFY(repository.findById(archivedId).has_value());
     QVERIFY(repository.findById(predecessor).has_value());
-    QCOMPARE(repository.findAllDependencies(),
-             QList<TaskDependency>({TaskDependency{predecessor, archivedId}}));
+    const auto dependencies = repository.findAllDependencies();
+    QCOMPARE(dependencies.size(), 2);
+    QVERIFY(dependencies.contains(TaskDependency{predecessor, firstArchivedId}));
+    QVERIFY(dependencies.contains(TaskDependency{firstArchivedId, archivedId}));
 }
 
 QTEST_MAIN(SqliteTaskRepositoryTest)

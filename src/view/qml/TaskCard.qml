@@ -33,6 +33,9 @@ Rectangle {
     required property int estimatedMinutes
     required property bool overdue
     required property bool canDeletePermanently
+    required property bool bulkSelectionMode
+    required property bool bulkSelected
+    required property bool bulkSelectable
 
     signal detailsRequested(string taskId)
     signal editRequested(string taskId)
@@ -44,6 +47,7 @@ Rectangle {
     signal cancelRequested(string taskId, string title)
     signal archiveRequested(string taskId, string title)
     signal deletePermanentlyRequested(string taskId, string title)
+    signal bulkSelectionToggled(string taskId)
     signal dragActiveRequested(bool active)
 
     height: Math.max(card.theme.px(138), cardContent.implicitHeight + card.theme.px(24))
@@ -63,9 +67,40 @@ Rectangle {
     }
 
     HoverHandler { id: cardHover }
-    TapHandler { onTapped: card.detailsRequested(card.taskId) }
-    Keys.onReturnPressed: card.detailsRequested(card.taskId)
-    Keys.onSpacePressed: card.detailsRequested(card.taskId)
+    TapHandler {
+        onTapped: eventPoint => {
+            if (!card.bulkSelectionMode) {
+                card.detailsRequested(card.taskId)
+                return
+            }
+            if (!card.bulkSelectable)
+                return
+            const checkPoint = bulkCheckBox.mapFromItem(
+                                 card, eventPoint.position.x,
+                                 eventPoint.position.y)
+            // CheckBox自身已转发点击，父级卡片不得再次切换同一TaskId。
+            if (checkPoint.x >= 0 && checkPoint.x <= bulkCheckBox.width
+                    && checkPoint.y >= 0 && checkPoint.y <= bulkCheckBox.height)
+                return
+            card.bulkSelectionToggled(card.taskId)
+        }
+    }
+    Keys.onReturnPressed: {
+        if (card.bulkSelectionMode) {
+            if (card.bulkSelectable)
+                card.bulkSelectionToggled(card.taskId)
+        } else {
+            card.detailsRequested(card.taskId)
+        }
+    }
+    Keys.onSpacePressed: {
+        if (card.bulkSelectionMode) {
+            if (card.bulkSelectable)
+                card.bulkSelectionToggled(card.taskId)
+        } else {
+            card.detailsRequested(card.taskId)
+        }
+    }
 
     RowLayout {
         id: cardContent
@@ -74,10 +109,22 @@ Rectangle {
         anchors.leftMargin: card.theme.px(18)
         spacing: card.theme.px(12)
 
+        CheckBox {
+            id: bulkCheckBox
+            objectName: "bulkTaskCheckBox_" + card.taskId
+            visible: card.bulkSelectionMode
+            checked: card.bulkSelected
+            enabled: card.bulkSelectable
+            opacity: card.bulkSelectable ? 1.0 : 0.45
+            Accessible.name: card.bulkSelected ? qsTr("取消选择 %1").arg(card.title)
+                                               : qsTr("选择 %1").arg(card.title)
+            onClicked: card.bulkSelectionToggled(card.taskId)
+        }
+
         Rectangle {
             id: dragHandle
             objectName: "dragHandle_" + card.taskId
-            visible: card.canStart
+            visible: !card.bulkSelectionMode && card.canStart
             Layout.preferredWidth: card.theme.px(34)
             Layout.preferredHeight: card.theme.px(44)
             radius: 8
@@ -231,7 +278,9 @@ Rectangle {
 
         Button {
             objectName: "primaryTaskAction_" + card.taskId
-            visible: card.canStart || card.canComplete || card.canRedo || card.canRestore
+            visible: !card.bulkSelectionMode
+                     && (card.canStart || card.canComplete
+                         || card.canRedo || card.canRestore)
             text: card.canStart ? qsTr("开始")
                   : card.canComplete ? qsTr("完成")
                   : card.canRedo ? qsTr("重做") : qsTr("恢复")
@@ -244,6 +293,7 @@ Rectangle {
         }
         ToolButton {
             objectName: "taskMenuButton_" + card.taskId
+            visible: !card.bulkSelectionMode
             text: "⋯"
             onClicked: cardMenu.open()
             Menu {

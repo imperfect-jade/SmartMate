@@ -1,4 +1,5 @@
 #include "fakes/FakeTaskCreationRepository.h"
+#include "fakes/FakeTaskBatchTransitionRepository.h"
 #include "fakes/FakeTaskDependencyRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
 #include "fakes/FakeTaskRepository.h"
@@ -24,6 +25,7 @@ using smartmate::model::TaskPriority;
 using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
 using smartmate::tests::FakeTaskCreationRepository;
+using smartmate::tests::FakeTaskBatchTransitionRepository;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::tests::FakeTaskDeletionRepository;
 using smartmate::tests::FakeTaskRepository;
@@ -64,9 +66,10 @@ struct ServiceFixture final {
         : repository(std::move(tasks))
         , dependencyRepository(std::move(dependencies))
         , creationRepository(repository, dependencyRepository)
+        , batchTransitionRepository(repository)
         , deletionRepository(repository, dependencyRepository)
         , service(repository, dependencyRepository, creationRepository,
-                  deletionRepository)
+                  batchTransitionRepository, deletionRepository)
         , taskChanged(&service, &TaskService::tasksChanged)
         , dependencyChanged(&service, &TaskService::dependenciesChanged)
     {
@@ -75,6 +78,7 @@ struct ServiceFixture final {
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository;
+    FakeTaskBatchTransitionRepository batchTransitionRepository;
     FakeTaskDeletionRepository deletionRepository;
     TaskService service;
     QSignalSpy taskChanged;

@@ -100,6 +100,8 @@ SmartMate             → persistence + viewmodel + ui 插件
 
 归档永久删除使用另一条显式命令链：`QML确认 → TaskListViewModel → TaskService → ITaskDeletionRepository → SQLite事务`。只有归档实体可删除；Persistence先删除目标任务的全部入边和出边，再以归档状态条件删除任务，任一步失败都必须回滚。Schema继续使用`ON DELETE RESTRICT`阻止绕过端口的直接删除。
 
+批量管理沿用同一边界：`QML选择事件 → TaskListViewModel的QSet<TaskId> → TaskService批量校验 → 原子Repository端口 → SQLite事务`。批量归档与恢复通过独立状态写入端口一次提交全部条件更新，批量永久删除通过删除端口一次清理全部目标及关联边；任一任务缺失、资格变化、依赖冲突或写入失败都必须整批回滚。选择集、批量模式和全选状态只属于ViewModel会话投影，QML不得收集ID数组或循环调用单项命令。
+
 依赖图读取链路为：`SQLite Repository → TaskService结构化图快照 → TaskGraphViewModel纵向布局与正交路由 → QML Shape渲染`。Model负责最长前置链层级、活动任务及其相连归档节点闭包、上下游闭包、边解析状态和异常图拒绝；ViewModel负责交叉最小化、虚拟路由点、端口、层间通道、像素坐标和详情投影；View只绘制路径、主题与动画，并转发稳定任务ID。布局、筛选、缩放、响应式详情面板和选中状态不持久化。
 
 `view.qml_bootstrap` CTest 使用内存 SQLite 和 Qt 离屏平台执行整条链路，并在根对象创建成功后自动退出。它可以发现数据库驱动、QML 模块、属性注入和运行库加载问题，同时不会写入用户数据。

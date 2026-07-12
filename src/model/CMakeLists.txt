@@ -22,6 +22,7 @@ add_library(smartmate_model STATIC
     planner/TaskCommandPolicy.cpp
     repositories/RepositoryException.h
     repositories/IAppearanceSettingsRepository.h
+    repositories/ITaskBatchTransitionRepository.h
     repositories/ITaskCreationRepository.h
     repositories/ITaskDeletionRepository.h
     repositories/ITaskDependencyRepository.h

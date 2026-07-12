@@ -20,7 +20,7 @@ void TaskViewModelsTest::listProjectsActiveAndArchivedTasksInPlanOrder()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.count(), 3);
@@ -86,7 +86,7 @@ void TaskViewModelsTest::listMapsEveryRecommendedOrderReason()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(reasonForId(viewModel, inProgress.id().toString(QUuid::WithoutBraces)),
@@ -134,7 +134,7 @@ void TaskViewModelsTest::listSearchesTrimmedKeywordsInTitleAndDescription()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.setSearchText(QStringLiteral("  report  "));
@@ -181,7 +181,7 @@ void TaskViewModelsTest::listCombinesPrioritySearchAndArchiveFilters()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.priorityFilterOptions(),
@@ -217,7 +217,7 @@ void TaskViewModelsTest::listFilterPropertiesNotifyOnceAndRejectInvalidIndexes()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy searchSpy{&viewModel, &TaskListViewModel::searchTextChanged};
     QSignalSpy prioritySpy{&viewModel,
@@ -269,7 +269,7 @@ void TaskViewModelsTest::listRetainsFiltersAndStableTaskIdAcrossServiceReloads()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.setSearchText(QStringLiteral("needle"));
@@ -306,7 +306,7 @@ void TaskViewModelsTest::listSchedulesMinuteRefreshForTimeSensitiveReasons()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     const auto timers = viewModel.findChildren<QTimer *>(
@@ -356,7 +356,7 @@ void TaskViewModelsTest::listProjectsOverdueStateIndependentlyFromOrderReason()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     const auto overdueFor = [&viewModel](const Task &stored) {
@@ -400,7 +400,7 @@ void TaskViewModelsTest::listProjectsAndExecutesStateActionsByStableTaskId()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     const QString stableId = idAt(viewModel, 0);
@@ -489,7 +489,7 @@ void TaskViewModelsTest::onlyTodoTasksCanOpenEditor()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel list{service};
     TaskEditorViewModel editor{service};
     const auto canEdit = [&list](const Task &stored) {
@@ -539,7 +539,7 @@ void TaskViewModelsTest::listProjectsAndForwardsPermanentDeletionByStableTaskId(
     FakeTaskDeletionRepository localDeletionRepository{repository,
                                                         dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        localDeletionRepository};
+                        batchTransitionsFor(repository), localDeletionRepository};
     TaskListViewModel viewModel{service};
 
     const int todoRow = rowForId(
@@ -566,6 +566,176 @@ void TaskViewModelsTest::listProjectsAndForwardsPermanentDeletionByStableTaskId(
     QCOMPARE(localDeletionRepository.deletedTaskIds().size(), 1);
 }
 
+void TaskViewModelsTest::listMaintainsBulkSelectionByStableIdAndResetsAtDisplayBoundaries()
+{
+    const Task todo = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("不可批量的待办"), TaskStatus::Todo, 1700000001000);
+    const Task done = task(
+        QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
+        QStringLiteral("可归档完成项"), TaskStatus::Done, 1700000002000);
+    const Task cancelled = task(
+        QStringLiteral("{33333333-3333-3333-3333-333333333333}"),
+        QStringLiteral("可归档取消项"), TaskStatus::Cancelled, 1700000003000);
+    const Task archived = task(
+        QStringLiteral("{44444444-4444-4444-4444-444444444444}"),
+        QStringLiteral("归档视图任务"), TaskStatus::Archived, 1700000004000);
+    FakeTaskRepository repository{{cancelled, archived, todo, done}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchRepository{repository};
+    FakeTaskDeletionRepository localDeletionRepository{repository,
+                                                        dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchRepository, localDeletionRepository};
+    TaskListViewModel viewModel{service};
+    QSignalSpy bulkSpy{&viewModel, &TaskListViewModel::bulkSelectionChanged};
+
+    QCOMPARE(viewModel.bulkSelectableVisibleCount(), 2);
+    viewModel.beginBulkSelection();
+    QVERIFY(viewModel.bulkSelectionMode());
+    const QString todoId = todo.id().toString(QUuid::WithoutBraces);
+    const QString doneId = done.id().toString(QUuid::WithoutBraces);
+    const QString cancelledId = cancelled.id().toString(QUuid::WithoutBraces);
+    QVERIFY(!viewModel.toggleBulkSelection(todoId));
+    QVERIFY(viewModel.toggleBulkSelection(doneId));
+    QCOMPARE(viewModel.bulkSelectedCount(), 1);
+    QVERIFY(viewModel.data(viewModel.index(rowForId(viewModel, doneId)),
+                           TaskListViewModel::BulkSelectedRole).toBool());
+    QVERIFY(!viewModel.data(viewModel.index(rowForId(viewModel, todoId)),
+                            TaskListViewModel::BulkSelectableRole).toBool());
+
+    // Model刷新改变行号后，选择仍由TaskId保留，而不是绑定旧行号。
+    const Task reordered{done.id(), done.title(), done.description(),
+                         done.priority(), done.status(),
+                         done.statusBeforeArchive(), done.deadline(),
+                         done.estimatedMinutes(), done.createdAtUtc(),
+                         utcTime(1800000000000)};
+    QVERIFY(repository.update(reordered));
+    viewModel.reload();
+    QVERIFY(viewModel.data(viewModel.index(rowForId(viewModel, doneId)),
+                           TaskListViewModel::BulkSelectedRole).toBool());
+
+    // 筛选条件变化清空选择但保留模式；恢复结果后可以重新选择。
+    viewModel.setSearchText(QStringLiteral("无匹配结果"));
+    QCOMPARE(viewModel.bulkSelectedCount(), 0);
+    QVERIFY(viewModel.bulkSelectionMode());
+    QCOMPARE(viewModel.bulkSelectableVisibleCount(), 0);
+    viewModel.setSearchText({});
+    QVERIFY(viewModel.toggleBulkSelection(cancelledId));
+    QCOMPARE(viewModel.bulkSelectedCount(), 1);
+
+    // 活动/归档边界改变时必须同时清空并退出，避免跨视图误操作。
+    viewModel.setShowArchived(true);
+    QVERIFY(!viewModel.bulkSelectionMode());
+    QCOMPARE(viewModel.bulkSelectedCount(), 0);
+    QCOMPARE(viewModel.count(), 1);
+    QCOMPARE(viewModel.bulkSelectableVisibleCount(), 1);
+    QVERIFY(bulkSpy.count() > 0);
+}
+
+void TaskViewModelsTest::listExecutesAtomicBulkCommandsAndPreservesFailedSelection()
+{
+    const Task done = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("批量完成项"), TaskStatus::Done, 1700000001000);
+    const Task cancelled = task(
+        QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
+        QStringLiteral("批量取消项"), TaskStatus::Cancelled, 1700000002000);
+    FakeTaskRepository repository{{cancelled, done}};
+    FakeTaskDependencyRepository dependencyRepository{{
+        TaskDependency{done.id(), cancelled.id()},
+    }};
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchRepository{repository};
+    FakeTaskDeletionRepository localDeletionRepository{repository,
+                                                        dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchRepository, localDeletionRepository};
+    TaskListViewModel viewModel{service};
+    QSignalSpy tasksSpy{&service, &TaskService::tasksChanged};
+    QSignalSpy dependenciesSpy{&service, &TaskService::dependenciesChanged};
+
+    viewModel.beginBulkSelection();
+    viewModel.toggleSelectAllVisible();
+    QCOMPARE(viewModel.bulkSelectedCount(), 2);
+    QVERIFY(viewModel.allVisibleSelected());
+    QVERIFY(viewModel.canBulkArchive());
+    QVERIFY(viewModel.archiveSelectedTasks());
+    QVERIFY(!viewModel.bulkSelectionMode());
+    QCOMPARE(batchRepository.callCount(), 1);
+    QCOMPARE(tasksSpy.count(), 1);
+
+    viewModel.setShowArchived(true);
+    QCOMPARE(viewModel.count(), 2);
+    viewModel.beginBulkSelection();
+    viewModel.toggleSelectAllVisible();
+    QVERIFY(viewModel.canBulkRestore());
+    QVERIFY(viewModel.restoreSelectedTasks());
+    QCOMPARE(repository.findById(done.id())->status(), TaskStatus::Done);
+    QCOMPARE(repository.findById(cancelled.id())->status(), TaskStatus::Cancelled);
+    QCOMPARE(tasksSpy.count(), 2);
+
+    // 再次归档后模拟删除事务失败：选择与模式均保留，便于用户重试。
+    QVERIFY(service.archiveTasks({done.id(), cancelled.id()}).ok());
+    viewModel.setShowArchived(true);
+    viewModel.beginBulkSelection();
+    viewModel.toggleSelectAllVisible();
+    localDeletionRepository.setWriteFailure(true);
+    QVERIFY(!viewModel.deleteSelectedArchivedTasks());
+    QVERIFY(viewModel.bulkSelectionMode());
+    QCOMPARE(viewModel.bulkSelectedCount(), 2);
+    QVERIFY(viewModel.errorMessage().contains(QStringLiteral("批量完成项")));
+    QVERIFY(viewModel.errorMessage().contains(
+        done.id().toString(QUuid::WithoutBraces).left(8)));
+    QCOMPARE(repository.tasks().size(), 2);
+    QCOMPARE(dependencyRepository.findAllDependencies().size(), 1);
+
+    localDeletionRepository.setWriteFailure(false);
+    QVERIFY(viewModel.deleteSelectedArchivedTasks());
+    QVERIFY(!viewModel.bulkSelectionMode());
+    QCOMPARE(viewModel.count(), 0);
+    QCOMPARE(repository.tasks().size(), 0);
+    QCOMPARE(dependencyRepository.findAllDependencies().size(), 0);
+    QCOMPARE(dependenciesSpy.count(), 1);
+
+    viewModel.beginBulkSelection();
+    QVERIFY(!viewModel.deleteSelectedArchivedTasks());
+    QVERIFY(viewModel.bulkSelectionMode());
+    QVERIFY(viewModel.errorMessage().contains(QStringLiteral("至少选择")));
+    viewModel.cancelBulkSelection();
+}
+
+void TaskViewModelsTest::listMapsBatchConflictIdsToTaskTitles()
+{
+    const Task conflicted = task(
+        QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
+        QStringLiteral("发生竞争的任务"), TaskStatus::Done, 1700000001000);
+    const Task unaffected = task(
+        QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
+        QStringLiteral("未冲突任务"), TaskStatus::Cancelled, 1700000002000);
+    FakeTaskRepository repository{{unaffected, conflicted}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchRepository{repository};
+    batchRepository.setResult({0, {conflicted.id()}});
+    FakeTaskDeletionRepository localDeletionRepository{repository,
+                                                        dependencyRepository};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        batchRepository, localDeletionRepository};
+    TaskListViewModel viewModel{service};
+
+    viewModel.beginBulkSelection();
+    viewModel.toggleSelectAllVisible();
+    QVERIFY(!viewModel.archiveSelectedTasks());
+    QCOMPARE(viewModel.bulkSelectedCount(), 2);
+    QVERIFY(viewModel.bulkSelectionMode());
+    QVERIFY(viewModel.errorMessage().contains(QStringLiteral("发生竞争的任务")));
+    QVERIFY(viewModel.errorMessage().contains(
+        conflicted.id().toString(QUuid::WithoutBraces).left(8)));
+    QVERIFY(!viewModel.errorMessage().contains(QStringLiteral("未冲突任务")));
+}
+
 
 void TaskViewModelsTest::listExposesAndClearsChineseErrors()
 {
@@ -573,7 +743,7 @@ void TaskViewModelsTest::listExposesAndClearsChineseErrors()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy errorSpy{&viewModel, &TaskListViewModel::errorOccurred};
 
@@ -606,7 +776,7 @@ void TaskViewModelsTest::listProjectsBlockingAndUnlockInformation()
     }};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     const int predecessorRow = rowForId(
@@ -656,7 +826,7 @@ void TaskViewModelsTest::listFocusProjectionIgnoresFiltersAndTracksInProgress()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.focusState(), TaskListViewModel::FocusState::Suggested);
@@ -688,7 +858,7 @@ void TaskViewModelsTest::listSelectsStableTaskDetails()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository};
     TaskListViewModel viewModel{service};
 
     QVERIFY(viewModel.selectTask(stored.id().toString(QUuid::WithoutBraces)));

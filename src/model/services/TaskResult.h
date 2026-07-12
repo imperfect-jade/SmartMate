@@ -35,6 +35,7 @@ enum class TaskError {
     DependencyStateConflict,
     TaskDetailsNotEditable,
     TaskDeletionNotAllowed,
+    EmptyTaskSelection,
     NotFound,
     InProgressConflict,
     PersistenceFailure,
@@ -112,6 +113,12 @@ struct ServiceResult final {
 
 using TaskResult = ServiceResult<Task>;
 using TaskListResult = ServiceResult<QList<Task>>;
+/// 批量命令成功时返回按稳定 TaskId 排序的最终任务快照及删除的依赖数量。
+struct TaskBatchOutcome final {
+    QList<Task> tasks;
+    int removedDependencyCount{0};
+};
+using TaskBatchResult = ServiceResult<TaskBatchOutcome>;
 using TaskPlanResult = ServiceResult<QList<PlannedTask>>;
 using TaskDependencyListResult = ServiceResult<QList<TaskDependency>>;
 using TaskGraphResult = ServiceResult<TaskGraphSnapshot>;

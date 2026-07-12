@@ -610,8 +610,81 @@ void SqliteTaskRepository::insertTaskWithPredecessors(
     }
 }
 
+TaskBatchWriteResult SqliteTaskRepository::updateTaskStatesAtomically(
+    const QList<TaskStateChange> &changes)
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    if (!database.transaction()) {
+        throwDatabaseError(
+            QStringLiteral("Cannot start batch task transition transaction"),
+            database.lastError());
+    }
+
+    try {
+        // expected_status 是 Service 预检与真正写入之间的并发防线；一个任务冲突时，
+        // 先收集全部冲突 ID，再回滚此前已执行的更新，绝不产生部分成功。
+        QSqlQuery updateQuery(database);
+        updateQuery.prepare(QStringLiteral(
+            "UPDATE tasks SET "
+            "status = :target_status, "
+            "status_before_archive = :status_before_archive, "
+            "updated_at_utc_ms = :updated_at_utc_ms "
+            "WHERE id = :task_id AND status = :expected_status"));
+
+        QList<TaskId> conflictingTaskIds;
+        for (const TaskStateChange &change : changes) {
+            updateQuery.bindValue(QStringLiteral(":target_status"),
+                                  statusToStorage(change.targetStatus));
+            if (change.statusBeforeArchive.has_value()) {
+                updateQuery.bindValue(
+                    QStringLiteral(":status_before_archive"),
+                    statusToStorage(*change.statusBeforeArchive));
+            } else {
+                updateQuery.bindValue(QStringLiteral(":status_before_archive"),
+                                      QVariant());
+            }
+            updateQuery.bindValue(
+                QStringLiteral(":updated_at_utc_ms"),
+                change.updatedAtUtc.toUTC().toMSecsSinceEpoch());
+            updateQuery.bindValue(
+                QStringLiteral(":task_id"),
+                change.taskId.toString(QUuid::WithoutBraces));
+            updateQuery.bindValue(QStringLiteral(":expected_status"),
+                                  statusToStorage(change.expectedStatus));
+            if (!updateQuery.exec()) {
+                throwDatabaseError(QStringLiteral("Cannot update batch task state"),
+                                   updateQuery.lastError());
+            }
+            if (updateQuery.numRowsAffected() != 1) {
+                conflictingTaskIds.append(change.taskId);
+            }
+            updateQuery.finish();
+        }
+
+        if (!conflictingTaskIds.isEmpty()) {
+            if (!database.rollback()) {
+                throwDatabaseError(
+                    QStringLiteral("Cannot roll back conflicting batch task transition"),
+                    database.lastError());
+            }
+            return {0, std::move(conflictingTaskIds)};
+        }
+
+        if (!database.commit()) {
+            throwDatabaseError(
+                QStringLiteral("Cannot commit batch task transition transaction"),
+                database.lastError());
+        }
+        return {static_cast<int>(changes.size()), {}};
+    } catch (...) {
+        database.rollback();
+        throw;
+    }
+}
+
 TaskDeletionWriteResult
-SqliteTaskRepository::deleteArchivedTaskWithDependencies(const TaskId &taskId)
+SqliteTaskRepository::deleteArchivedTasksWithDependencies(
+    const QList<TaskId> &taskIds)
 {
     auto database = QSqlDatabase::database(m_connectionName, false);
     if (!database.transaction()) {
@@ -621,48 +694,62 @@ SqliteTaskRepository::deleteArchivedTaskWithDependencies(const TaskId &taskId)
     }
 
     try {
-        // RESTRICT外键仍是默认防线；只有这个显式命令端口可以先清理入边和出边。
+        // 循环复用预编译语句既避免 SQLite 参数上限，也使选中任务之间的共享边只在
+        // 第一次命中时计数。若后续状态条件冲突，整个事务会恢复全部已删除边。
         QSqlQuery dependencyQuery(database);
         dependencyQuery.prepare(QStringLiteral(
             "DELETE FROM task_dependencies "
             "WHERE predecessor_id = :task_id OR successor_id = :task_id"));
-        dependencyQuery.bindValue(
-            QStringLiteral(":task_id"),
-            taskId.toString(QUuid::WithoutBraces));
-        if (!dependencyQuery.exec()) {
-            throwDatabaseError(
-                QStringLiteral("Cannot delete task dependencies"),
-                dependencyQuery.lastError());
-        }
-        const qint64 removedDependencyCount = dependencyQuery.numRowsAffected();
-        dependencyQuery.finish();
-        if (removedDependencyCount < 0
-            || removedDependencyCount > std::numeric_limits<int>::max()) {
-            throwPersistenceError(
-                QStringLiteral("SQLite returned an invalid removed dependency count"));
+        qint64 removedDependencyCount = 0;
+        for (const TaskId &taskId : taskIds) {
+            dependencyQuery.bindValue(
+                QStringLiteral(":task_id"),
+                taskId.toString(QUuid::WithoutBraces));
+            if (!dependencyQuery.exec()) {
+                throwDatabaseError(
+                    QStringLiteral("Cannot delete batch task dependencies"),
+                    dependencyQuery.lastError());
+            }
+            const qint64 removedForTask = dependencyQuery.numRowsAffected();
+            if (removedForTask < 0
+                || removedDependencyCount
+                    > std::numeric_limits<int>::max() - removedForTask) {
+                throwPersistenceError(QStringLiteral(
+                    "SQLite returned an invalid removed dependency count"));
+            }
+            removedDependencyCount += removedForTask;
+            dependencyQuery.finish();
         }
 
         QSqlQuery taskQuery(database);
         taskQuery.prepare(QStringLiteral(
             "DELETE FROM tasks WHERE id = :task_id AND status = 'archived'"));
-        taskQuery.bindValue(
-            QStringLiteral(":task_id"),
-            taskId.toString(QUuid::WithoutBraces));
-        if (!taskQuery.exec()) {
-            throwDatabaseError(QStringLiteral("Cannot permanently delete task"),
-                               taskQuery.lastError());
+        QList<TaskId> conflictingTaskIds;
+        int deletedTaskCount = 0;
+        for (const TaskId &taskId : taskIds) {
+            taskQuery.bindValue(
+                QStringLiteral(":task_id"),
+                taskId.toString(QUuid::WithoutBraces));
+            if (!taskQuery.exec()) {
+                throwDatabaseError(
+                    QStringLiteral("Cannot permanently delete batch task"),
+                    taskQuery.lastError());
+            }
+            if (taskQuery.numRowsAffected() == 1) {
+                ++deletedTaskCount;
+            } else {
+                conflictingTaskIds.append(taskId);
+            }
+            taskQuery.finish();
         }
-        const qint64 deletedTaskCount = taskQuery.numRowsAffected();
-        taskQuery.finish();
 
-        if (deletedTaskCount != 1) {
-            // 目标缺失或在Service预检后不再归档时，必须恢复刚删除的全部依赖边。
+        if (!conflictingTaskIds.isEmpty()) {
             if (!database.rollback()) {
                 throwDatabaseError(
-                    QStringLiteral("Cannot roll back rejected permanent task deletion"),
+                    QStringLiteral("Cannot roll back conflicting permanent deletion"),
                     database.lastError());
             }
-            return {};
+            return {0, 0, std::move(conflictingTaskIds)};
         }
 
         if (!database.commit()) {
@@ -670,7 +757,7 @@ SqliteTaskRepository::deleteArchivedTaskWithDependencies(const TaskId &taskId)
                 QStringLiteral("Cannot commit permanent task deletion transaction"),
                 database.lastError());
         }
-        return {true, static_cast<int>(removedDependencyCount)};
+        return {deletedTaskCount, static_cast<int>(removedDependencyCount), {}};
     } catch (...) {
         database.rollback();
         throw;

@@ -45,6 +45,8 @@ QString taskErrorMessage(const model::TaskError error)
         return QStringLiteral("只有待办任务可以编辑，请先通过合法状态操作将任务恢复为待办。");
     case TaskDeletionNotAllowed:
         return QStringLiteral("只有归档任务可以永久删除。");
+    case EmptyTaskSelection:
+        return QStringLiteral("请至少选择一项可以批量处理的任务。");
     case NotFound:
         return QStringLiteral("任务不存在或已无法访问。");
     case InProgressConflict:

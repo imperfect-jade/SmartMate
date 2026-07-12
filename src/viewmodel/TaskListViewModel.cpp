@@ -163,6 +163,10 @@ QVariant TaskListViewModel::data(const QModelIndex &index, const int role) const
         return availabilityFor(task.id()).canRestore;
     case CanDeletePermanentlyRole:
         return availabilityFor(task.id()).canDeletePermanently;
+    case BulkSelectedRole:
+        return m_bulkSelectedTaskIds.contains(task.id());
+    case BulkSelectableRole:
+        return isBulkSelectable(task.id());
     default:
         return {};
     }
@@ -196,6 +200,8 @@ QHash<int, QByteArray> TaskListViewModel::roleNames() const
         {CanArchiveRole, "canArchive"},
         {CanRestoreRole, "canRestore"},
         {CanDeletePermanentlyRole, "canDeletePermanently"},
+        {BulkSelectedRole, "bulkSelected"},
+        {BulkSelectableRole, "bulkSelectable"},
     };
 }
 
@@ -227,6 +233,52 @@ bool TaskListViewModel::hasActiveFilters() const
 {
     return !m_searchText.trimmed().isEmpty()
         || m_priorityFilterIndex != allPrioritiesFilterIndex;
+}
+
+bool TaskListViewModel::bulkSelectionMode() const noexcept
+{
+    return m_bulkSelectionMode;
+}
+
+int TaskListViewModel::bulkSelectedCount() const noexcept
+{
+    return m_bulkSelectedTaskIds.size();
+}
+
+int TaskListViewModel::bulkSelectableVisibleCount() const
+{
+    return static_cast<int>(std::count_if(
+        m_visibleTasks.cbegin(), m_visibleTasks.cend(),
+        [this](const model::Task &task) { return isBulkSelectable(task.id()); }));
+}
+
+bool TaskListViewModel::allVisibleSelected() const
+{
+    const int selectableCount = bulkSelectableVisibleCount();
+    return selectableCount > 0 && selectableCount == m_bulkSelectedTaskIds.size();
+}
+
+bool TaskListViewModel::canBulkArchive() const noexcept
+{
+    return m_bulkSelectionMode && !m_showArchived
+        && !m_bulkSelectedTaskIds.isEmpty();
+}
+
+bool TaskListViewModel::canBulkRestore() const
+{
+    return m_bulkSelectionMode && m_showArchived
+        && !m_bulkSelectedTaskIds.isEmpty()
+        && std::all_of(m_bulkSelectedTaskIds.cbegin(),
+                       m_bulkSelectedTaskIds.cend(),
+                       [this](const model::TaskId &id) {
+                           return availabilityFor(id).canRestore;
+                       });
+}
+
+bool TaskListViewModel::canBulkDelete() const noexcept
+{
+    return m_bulkSelectionMode && m_showArchived
+        && !m_bulkSelectedTaskIds.isEmpty();
 }
 
 QString TaskListViewModel::errorMessage() const
@@ -405,6 +457,8 @@ void TaskListViewModel::setShowArchived(const bool showArchived)
         return;
     }
 
+    m_bulkSelectionMode = false;
+    m_bulkSelectedTaskIds.clear();
     m_showArchived = showArchived;
     emit showArchivedChanged();
     rebuildVisibleTasks();
@@ -417,6 +471,7 @@ void TaskListViewModel::setSearchText(const QString &searchText)
     }
 
     const bool previouslyActive = hasActiveFilters();
+    m_bulkSelectedTaskIds.clear();
     m_searchText = searchText;
     emit searchTextChanged();
     if (previouslyActive != hasActiveFilters()) {
@@ -434,6 +489,7 @@ void TaskListViewModel::setPriorityFilterIndex(const int priorityFilterIndex)
     }
 
     const bool previouslyActive = hasActiveFilters();
+    m_bulkSelectedTaskIds.clear();
     m_priorityFilterIndex = priorityFilterIndex;
     emit priorityFilterIndexChanged();
     if (previouslyActive != hasActiveFilters()) {
@@ -520,6 +576,7 @@ void TaskListViewModel::clearFilters()
     }
 
     const bool previouslyActive = hasActiveFilters();
+    m_bulkSelectedTaskIds.clear();
     m_searchText.clear();
     m_priorityFilterIndex = allPrioritiesFilterIndex;
     if (searchChanged) {
@@ -579,6 +636,137 @@ bool TaskListViewModel::deleteArchivedTask(const QString &taskId)
         return false;
     }
     setError({});
+    return true;
+}
+
+void TaskListViewModel::beginBulkSelection()
+{
+    if (m_bulkSelectionMode) {
+        return;
+    }
+    m_bulkSelectionMode = true;
+    m_bulkSelectedTaskIds.clear();
+    emit bulkSelectionChanged();
+}
+
+bool TaskListViewModel::toggleBulkSelection(const QString &taskId)
+{
+    if (!m_bulkSelectionMode) {
+        return false;
+    }
+    const model::TaskId id = parseTaskId(taskId);
+    if (id.isNull() || !isBulkSelectable(id)) {
+        return false;
+    }
+
+    QSet<model::TaskId> selection = m_bulkSelectedTaskIds;
+    if (!selection.remove(id)) {
+        selection.insert(id);
+    }
+    setBulkSelection(std::move(selection));
+    return true;
+}
+
+void TaskListViewModel::toggleSelectAllVisible()
+{
+    if (!m_bulkSelectionMode) {
+        return;
+    }
+
+    QSet<model::TaskId> visibleSelection;
+    for (const model::Task &task : std::as_const(m_visibleTasks)) {
+        if (isBulkSelectable(task.id())) {
+            visibleSelection.insert(task.id());
+        }
+    }
+    setBulkSelection(allVisibleSelected() ? QSet<model::TaskId>{}
+                                          : std::move(visibleSelection));
+}
+
+void TaskListViewModel::clearBulkSelection()
+{
+    setBulkSelection({});
+}
+
+void TaskListViewModel::cancelBulkSelection()
+{
+    if (!m_bulkSelectionMode && m_bulkSelectedTaskIds.isEmpty()) {
+        return;
+    }
+    m_bulkSelectionMode = false;
+    if (m_bulkSelectedTaskIds.isEmpty()) {
+        emit bulkSelectionChanged();
+    } else {
+        setBulkSelection({});
+    }
+}
+
+bool TaskListViewModel::archiveSelectedTasks()
+{
+    const auto result = m_taskService.archiveTasks(sortedBulkSelection());
+    if (!result.ok()) {
+        QList<model::TaskId> contextIds = result.context.conflictingTaskIds;
+        if (contextIds.isEmpty()) {
+            contextIds = result.context.blockingTaskIds;
+        }
+        if (contextIds.isEmpty()) {
+            contextIds = sortedBulkSelection();
+        }
+        const QString context = taskIdsContext(contextIds);
+        setError(context.isEmpty()
+                     ? taskErrorMessage(result.error)
+                     : QStringLiteral("%1：%2")
+                           .arg(context, taskErrorMessage(result.error)));
+        return false;
+    }
+    setError({});
+    cancelBulkSelection();
+    return true;
+}
+
+bool TaskListViewModel::restoreSelectedTasks()
+{
+    const auto result = m_taskService.restoreTasks(sortedBulkSelection());
+    if (!result.ok()) {
+        QList<model::TaskId> contextIds = result.context.conflictingTaskIds;
+        if (contextIds.isEmpty()) {
+            contextIds = result.context.blockingTaskIds;
+        }
+        if (contextIds.isEmpty()) {
+            contextIds = sortedBulkSelection();
+        }
+        const QString context = taskIdsContext(contextIds);
+        setError(context.isEmpty()
+                     ? taskErrorMessage(result.error)
+                     : QStringLiteral("%1：%2")
+                           .arg(context, taskErrorMessage(result.error)));
+        return false;
+    }
+    setError({});
+    cancelBulkSelection();
+    return true;
+}
+
+bool TaskListViewModel::deleteSelectedArchivedTasks()
+{
+    const auto result = m_taskService.deleteArchivedTasks(sortedBulkSelection());
+    if (!result.ok()) {
+        QList<model::TaskId> contextIds = result.context.conflictingTaskIds;
+        if (contextIds.isEmpty()) {
+            contextIds = result.context.blockingTaskIds;
+        }
+        if (contextIds.isEmpty()) {
+            contextIds = sortedBulkSelection();
+        }
+        const QString context = taskIdsContext(contextIds);
+        setError(context.isEmpty()
+                     ? taskErrorMessage(result.error)
+                     : QStringLiteral("%1：%2")
+                           .arg(context, taskErrorMessage(result.error)));
+        return false;
+    }
+    setError({});
+    cancelBulkSelection();
     return true;
 }
 
@@ -694,6 +882,79 @@ const model::TaskCommandAvailability &TaskListViewModel::availabilityFor(
     return iterator == m_availabilities.cend() ? emptyAvailability : iterator.value();
 }
 
+bool TaskListViewModel::isBulkSelectable(const model::TaskId &taskId) const
+{
+    if (!m_visibleTaskIds.contains(taskId)) {
+        return false;
+    }
+    const model::TaskCommandAvailability &availability = availabilityFor(taskId);
+    return m_showArchived ? availability.canDeletePermanently
+                          : availability.canArchive;
+}
+
+QList<model::TaskId> TaskListViewModel::sortedBulkSelection() const
+{
+    QList<model::TaskId> ids = m_bulkSelectedTaskIds.values();
+    std::sort(ids.begin(), ids.end(), [](const model::TaskId &left,
+                                         const model::TaskId &right) {
+        return left.toString(QUuid::WithoutBraces)
+            < right.toString(QUuid::WithoutBraces);
+    });
+    return ids;
+}
+
+QString TaskListViewModel::taskIdsContext(
+    const QList<model::TaskId> &taskIds) const
+{
+    QStringList labels;
+    QList<model::TaskId> ids = taskIds;
+    std::sort(ids.begin(), ids.end(), [](const model::TaskId &left,
+                                         const model::TaskId &right) {
+        return left.toString(QUuid::WithoutBraces)
+            < right.toString(QUuid::WithoutBraces);
+    });
+    const int visibleLabelCount = std::min(3, static_cast<int>(ids.size()));
+    labels.reserve(visibleLabelCount);
+    for (int index = 0; index < visibleLabelCount; ++index) {
+        const model::TaskId &id = ids.at(index);
+        const model::Task *task = taskForId(id);
+        const QString shortId = id.toString(QUuid::WithoutBraces).left(8);
+        labels.push_back(task == nullptr
+                             ? shortId
+                             : QStringLiteral("“%1”（%2）")
+                                   .arg(task->title(), shortId));
+    }
+    if (ids.size() > visibleLabelCount) {
+        labels.push_back(QStringLiteral("另 %1 项")
+                             .arg(ids.size() - visibleLabelCount));
+    }
+    return labels.join(QStringLiteral("、"));
+}
+
+void TaskListViewModel::pruneBulkSelection()
+{
+    QSet<model::TaskId> retained;
+    for (const model::TaskId &id : std::as_const(m_bulkSelectedTaskIds)) {
+        if (isBulkSelectable(id)) {
+            retained.insert(id);
+        }
+    }
+    m_bulkSelectedTaskIds = std::move(retained);
+}
+
+void TaskListViewModel::setBulkSelection(QSet<model::TaskId> selection)
+{
+    if (m_bulkSelectedTaskIds == selection) {
+        return;
+    }
+    m_bulkSelectedTaskIds = std::move(selection);
+    if (!m_visibleTasks.isEmpty()) {
+        emit dataChanged(index(0), index(m_visibleTasks.size() - 1),
+                         {BulkSelectedRole});
+    }
+    emit bulkSelectionChanged();
+}
+
 void TaskListViewModel::rebuildFocusTask()
 {
     const FocusState oldState = m_focusState;
@@ -735,6 +996,8 @@ void TaskListViewModel::rebuildVisibleTasks()
     beginResetModel();
     m_visibleTasks.clear();
     m_visibleTasks.reserve(m_allTasks.size());
+    m_visibleTaskIds.clear();
+    m_visibleTaskIds.reserve(m_allTasks.size());
 
     const QString keyword = m_searchText.trimmed();
     const bool filtersPriority =
@@ -757,10 +1020,14 @@ void TaskListViewModel::rebuildVisibleTasks()
         }
         // 过滤只删除不匹配项，剩余任务严格保留Model给出的计划顺序。
         m_visibleTasks.push_back(task);
+        m_visibleTaskIds.insert(task.id());
     }
 
+    // 刷新或重排只保留仍在当前结果中且仍具备资格的稳定 TaskId。
+    pruneBulkSelection();
     endResetModel();
     emit countChanged();
+    emit bulkSelectionChanged();
 }
 
 void TaskListViewModel::setError(const QString &message)

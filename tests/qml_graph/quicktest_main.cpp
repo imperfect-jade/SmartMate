@@ -23,7 +23,8 @@ public slots:
         m_repository = std::make_unique<persistence::SqliteTaskRepository>(
             QStringLiteral(":memory:"));
         m_service = std::make_unique<TaskService>(
-            *m_repository, *m_repository, *m_repository, *m_repository);
+            *m_repository, *m_repository, *m_repository, *m_repository,
+            *m_repository);
 
         TaskDraft predecessorDraft;
         predecessorDraft.title = QStringLiteral("需求分析");

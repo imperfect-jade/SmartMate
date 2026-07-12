@@ -10,6 +10,7 @@
 namespace smartmate::tests {
 
 class FakeTaskDeletionRepository;
+class FakeTaskBatchTransitionRepository;
 
 /// 可控内存端口同时模拟常规读写故障，以及预检后出现另一进行中任务的竞争窗口。
 class FakeTaskRepository final : public model::ITaskRepository {
@@ -103,6 +104,7 @@ public:
 
 private:
     friend class FakeTaskDeletionRepository;
+    friend class FakeTaskBatchTransitionRepository;
 
     [[nodiscard]] qsizetype findIndex(const model::TaskId &id) const
     {

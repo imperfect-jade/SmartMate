@@ -26,6 +26,7 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
               *m_taskRepository,
               *m_taskRepository,
               *m_taskRepository,
+              *m_taskRepository,
               *m_taskRepository))
     , m_appearanceRepository(
           std::make_unique<model::persistence::QSettingsAppearanceRepository>())

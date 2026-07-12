@@ -4,6 +4,7 @@
 #include "dependencies/TaskDependencyGraph.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QSet>
 
 #include <algorithm>
@@ -75,6 +76,20 @@ void normalizeIds(QList<TaskId> &taskIds)
 {
     return TaskResult::failure(TaskError::PersistenceFailure,
                                QStringLiteral("Unexpected repository failure."));
+}
+
+[[nodiscard]] TaskBatchResult batchPersistenceFailure(
+    const RepositoryException &exception)
+{
+    return TaskBatchResult::failure(TaskError::PersistenceFailure,
+                                    QString::fromUtf8(exception.what()));
+}
+
+[[nodiscard]] TaskBatchResult unexpectedBatchPersistenceFailure()
+{
+    return TaskBatchResult::failure(
+        TaskError::PersistenceFailure,
+        QStringLiteral("Unexpected batch repository failure."));
 }
 
 [[nodiscard]] TaskListResult persistenceListFailure(const RepositoryException &exception)
@@ -169,6 +184,35 @@ template<typename T>
                                            return task.id() == taskId;
                                        });
     return iterator == tasks.cend() ? nullptr : &*iterator;
+}
+
+/// 批量命令一次建立稳定TaskId到快照行的索引，避免任务较多时逐个线性查找退化为O(N²)。
+[[nodiscard]] QHash<TaskId, qsizetype> taskIndexesById(
+    const QList<Task> &tasks)
+{
+    QHash<TaskId, qsizetype> indexes;
+    indexes.reserve(tasks.size());
+    for (qsizetype index = 0; index < tasks.size(); ++index) {
+        indexes.insert(tasks.at(index).id(), index);
+    }
+    return indexes;
+}
+
+[[nodiscard]] TaskResult singleTaskResult(TaskBatchResult batchResult,
+                                          const TaskId &taskId)
+{
+    if (!batchResult.ok()) {
+        return TaskResult::failure(batchResult.error,
+                                   std::move(batchResult.detail),
+                                   std::move(batchResult.context));
+    }
+    const Task *task = findTaskInList(batchResult.value->tasks, taskId);
+    if (task == nullptr) {
+        return TaskResult::failure(
+            TaskError::PersistenceFailure,
+            QStringLiteral("Successful batch result omitted the requested task."));
+    }
+    return TaskResult::success(*task);
 }
 
 void replaceTaskSnapshot(QList<Task> &tasks, const Task &replacement)
@@ -272,6 +316,43 @@ struct ProtectedDependencyViolation final {
     return std::nullopt;
 }
 
+/// 对批量转换后的最终快照统一检查依赖；同类冲突聚合后一次返回，结果不受输入顺序影响。
+[[nodiscard]] std::optional<TaskBatchResult> batchDependencyStateFailure(
+    const QList<Task> &tasks,
+    const QList<TaskDependency> &dependencies,
+    const QSet<TaskId> &changedTaskIds)
+{
+    const TaskDependencyGraph graph{tasks, dependencies};
+    const DependencyGraphValidation validation = graph.validation();
+    if (!validation.ok()) {
+        return graphFailure<TaskBatchOutcome>(validation);
+    }
+
+    QList<ProtectedDependencyViolation> changedTaskViolations;
+    QList<ProtectedDependencyViolation> otherViolations;
+    for (const ProtectedDependencyViolation &violation
+         : protectedStateViolations(tasks, graph)) {
+        if (changedTaskIds.contains(violation.successorId)) {
+            changedTaskViolations.append(violation);
+        } else {
+            otherViolations.append(violation);
+        }
+    }
+    if (!changedTaskViolations.isEmpty()) {
+        return TaskBatchResult::failure(
+            TaskError::TaskBlocked,
+            QStringLiteral("One or more restored tasks are blocked by dependencies."),
+            stateViolationContext(changedTaskViolations));
+    }
+    if (!otherViolations.isEmpty()) {
+        return TaskBatchResult::failure(
+            TaskError::DependencyStateConflict,
+            QStringLiteral("The batch status change would invalidate protected successors."),
+            stateViolationContext(otherViolations));
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] QList<TaskDependency> dependenciesForSuccessor(
     const QList<TaskDependency> &dependencies,
     const TaskId &successorId)
@@ -351,4 +432,3 @@ struct ProtectedDependencyViolation final {
 } // namespace
 
 } // namespace smartmate::model
-

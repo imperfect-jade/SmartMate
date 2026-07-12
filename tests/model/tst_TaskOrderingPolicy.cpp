@@ -1,6 +1,7 @@
 #include "fakes/FakeTaskRepository.h"
 #include "fakes/FakeTaskDependencyRepository.h"
 #include "fakes/FakeTaskCreationRepository.h"
+#include "fakes/FakeTaskBatchTransitionRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
 
 #include "dependencies/TaskDependencyGraph.h"
@@ -31,6 +32,7 @@ using smartmate::model::orderTasks;
 using smartmate::model::taskCommandAvailabilities;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::tests::FakeTaskCreationRepository;
+using smartmate::tests::FakeTaskBatchTransitionRepository;
 using smartmate::tests::FakeTaskDeletionRepository;
 using smartmate::tests::FakeTaskRepository;
 
@@ -525,9 +527,11 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
     }};
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     FakeTaskDeletionRepository deletionRepository;
     const TaskService service{repository, dependencyRepository,
-                              creationRepository, deletionRepository};
+                              creationRepository, batchTransitionRepository,
+                              deletionRepository};
 
     const auto result = service.listRecommendedTasks();
     QVERIFY(result.ok());
@@ -543,8 +547,10 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
         {{taskId(10), taskId(20)},
          {taskId(20), taskId(10)}}};
     FakeTaskCreationRepository cyclicCreation{repository, cyclicDependencies};
+    FakeTaskBatchTransitionRepository cyclicBatchTransition{repository};
     const TaskService cyclicService{repository, cyclicDependencies,
-                                    cyclicCreation, deletionRepository};
+                                    cyclicCreation, cyclicBatchTransition,
+                                    deletionRepository};
     const auto cycle = cyclicService.listRecommendedTasks();
     QCOMPARE(cycle.error, TaskError::DependencyCycle);
     QCOMPARE(cycle.context.cyclePath.constFirst(),
@@ -572,9 +578,12 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
          {unfinished.id(), archivedActiveSuccessor.id()}}};
     FakeTaskCreationRepository inconsistentCreation{
         inconsistentRepository, inconsistentDependencies};
+    FakeTaskBatchTransitionRepository inconsistentBatchTransition{
+        inconsistentRepository};
     const TaskService inconsistentService{
         inconsistentRepository, inconsistentDependencies,
-        inconsistentCreation, deletionRepository};
+        inconsistentCreation, inconsistentBatchTransition,
+        deletionRepository};
     const auto inconsistentPlan = inconsistentService.listRecommendedTasks();
     QCOMPARE(inconsistentPlan.error, TaskError::DependencyStateConflict);
     QCOMPARE(inconsistentService.taskGraphSnapshot().error,

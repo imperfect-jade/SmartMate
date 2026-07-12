@@ -452,6 +452,117 @@ TestCase {
         tryCompare(testAppViewModel.taskList, "count", 3)
     }
 
+    function test_bulkManagementArchivesRestoresAndDeletesWithSingleCommands() {
+        const firstId = createTask("批量临时任务一", "", 1)
+        const secondId = createTask("批量临时任务二", "", 2)
+        verify(testAppViewModel.taskList.cancelTask(firstId),
+               testAppViewModel.taskList.errorMessage)
+        verify(testAppViewModel.taskList.cancelTask(secondId),
+               testAppViewModel.taskList.errorMessage)
+        tryCompare(testAppViewModel.taskList, "count", 5)
+
+        const bulkButton = findChild(subject, "bulkManagementButton")
+        verify(bulkButton !== null)
+        bulkButton.clicked()
+        tryCompare(testAppViewModel.taskList, "bulkSelectionMode", true)
+        const focusCard = findChild(subject, "focusTaskSlot")
+        const newTaskButton = findChild(subject, "newTaskButton")
+        verify(focusCard !== null)
+        verify(newTaskButton !== null)
+        tryCompare(focusCard, "visible", false)
+        tryCompare(newTaskButton, "visible", false)
+
+        tryVerify(function() {
+            return taskDelegate(firstId) !== null
+                    && taskDelegate(secondId) !== null
+                    && taskDelegate(gammaId) !== null
+        })
+        const firstCheck = findChild(taskDelegate(firstId),
+                                     "bulkTaskCheckBox_" + firstId)
+        const secondCheck = findChild(taskDelegate(secondId),
+                                      "bulkTaskCheckBox_" + secondId)
+        const todoCheck = findChild(taskDelegate(gammaId),
+                                    "bulkTaskCheckBox_" + gammaId)
+        verify(firstCheck !== null)
+        verify(secondCheck !== null)
+        verify(todoCheck !== null)
+        tryCompare(firstCheck, "enabled", true)
+        tryCompare(secondCheck, "enabled", true)
+        tryCompare(todoCheck, "enabled", false)
+        firstCheck.clicked()
+        secondCheck.clicked()
+        tryCompare(testAppViewModel.taskList, "bulkSelectedCount", 2)
+        const selectedLabel = findChild(subject, "bulkSelectedCountLabel")
+        verify(selectedLabel !== null)
+        verify(selectedLabel.text.indexOf("2") >= 0)
+        const menuButton = findChild(taskDelegate(firstId),
+                                     "taskMenuButton_" + firstId)
+        verify(menuButton !== null)
+        tryCompare(menuButton, "visible", false)
+
+        const archiveButton = findChild(subject, "bulkArchiveButton")
+        verify(archiveButton !== null)
+        archiveButton.clicked()
+        const archiveDialog = findChild(subject, "bulkArchiveTaskDialog")
+        verify(archiveDialog !== null)
+        tryCompare(archiveDialog, "opened", true)
+        archiveDialog.reject()
+        tryCompare(testAppViewModel.taskList, "bulkSelectedCount", 2)
+        archiveButton.clicked()
+        tryCompare(archiveDialog, "opened", true)
+        archiveDialog.accept()
+        tryCompare(testAppViewModel.taskList, "bulkSelectionMode", false)
+        tryCompare(testAppViewModel.taskList, "count", 3)
+
+        testAppViewModel.taskList.showArchived = true
+        tryCompare(testAppViewModel.taskList, "count", 2)
+        findChild(subject, "bulkManagementButton").clicked()
+        findChild(subject, "selectAllVisibleButton").clicked()
+        tryCompare(testAppViewModel.taskList, "bulkSelectedCount", 2)
+        const restoreButton = findChild(subject, "bulkRestoreButton")
+        verify(restoreButton !== null)
+        restoreButton.clicked()
+        tryCompare(testAppViewModel.taskList, "bulkSelectionMode", false)
+        tryCompare(testAppViewModel.taskList, "count", 0)
+
+        // 恢复后回到已取消状态，再通过批量归档准备永久删除确认场景。
+        testAppViewModel.taskList.showArchived = false
+        tryCompare(testAppViewModel.taskList, "count", 5)
+        findChild(subject, "bulkManagementButton").clicked()
+        findChild(taskDelegate(firstId), "bulkTaskCheckBox_" + firstId).clicked()
+        findChild(taskDelegate(secondId), "bulkTaskCheckBox_" + secondId).clicked()
+        findChild(subject, "bulkArchiveButton").clicked()
+        tryCompare(archiveDialog, "opened", true)
+        archiveDialog.accept()
+
+        testAppViewModel.taskList.showArchived = true
+        tryCompare(testAppViewModel.taskList, "count", 2)
+        findChild(subject, "bulkManagementButton").clicked()
+        findChild(subject, "selectAllVisibleButton").clicked()
+        const deleteButton = findChild(subject, "bulkDeleteButton")
+        verify(deleteButton !== null)
+        deleteButton.clicked()
+        const deleteDialog = findChild(subject,
+                                       "bulkDeleteArchivedTaskDialog")
+        const warning = findChild(subject,
+                                  "bulkDeleteArchivedTaskWarning")
+        verify(deleteDialog !== null)
+        verify(warning !== null)
+        tryCompare(deleteDialog, "opened", true)
+        verify(warning.text.indexOf("2") >= 0)
+        verify(warning.text.indexOf("不可撤销") >= 0)
+        verify(warning.text.indexOf("前置和后继依赖") >= 0)
+        deleteDialog.reject()
+        tryCompare(testAppViewModel.taskList, "bulkSelectedCount", 2)
+        deleteButton.clicked()
+        tryCompare(deleteDialog, "opened", true)
+        deleteDialog.accept()
+        tryCompare(testAppViewModel.taskList, "bulkSelectionMode", false)
+        tryCompare(testAppViewModel.taskList, "count", 0)
+        testAppViewModel.taskList.showArchived = false
+        tryCompare(testAppViewModel.taskList, "count", 3)
+    }
+
     function test_editorShowsReadOnlyInitialStatusInsteadOfStatusSelector() {
         const newTaskButton = findChild(subject, "newTaskButton")
         verify(newTaskButton !== null)
