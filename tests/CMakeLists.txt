@@ -189,6 +189,13 @@ target_link_libraries(tst_task_widgets
 add_test(NAME view.widgets_tasks COMMAND tst_task_widgets -platform offscreen)
 set_tests_properties(view.widgets_tasks PROPERTIES TIMEOUT 20)
 
+qt_add_executable(tst_graph_widgets
+    widgets/tst_GraphWidgets.cpp
+)
+target_link_libraries(tst_graph_widgets PRIVATE smartmate_widgets Qt6::Test)
+add_test(NAME view.widgets_graph COMMAND tst_graph_widgets -platform offscreen)
+set_tests_properties(view.widgets_graph PROPERTIES TIMEOUT 20)
+
 qt_add_executable(tst_widgets_appearance_flow
     integration/tst_WidgetsAppearanceFlow.cpp
     fakes/FakeAppearanceSettingsRepository.h
@@ -218,6 +225,15 @@ target_link_libraries(tst_widgets_category_dependency_flow
 add_test(NAME integration.widgets_category_dependencies
     COMMAND tst_widgets_category_dependency_flow -platform offscreen)
 set_tests_properties(integration.widgets_category_dependencies PROPERTIES TIMEOUT 30)
+
+qt_add_executable(tst_widgets_graph_flow
+    integration/tst_WidgetsGraphFlow.cpp
+)
+target_link_libraries(tst_widgets_graph_flow
+    PRIVATE smartmate_widgets smartmate_persistence smartmate_viewmodel Qt6::Test
+)
+add_test(NAME integration.widgets_graph COMMAND tst_widgets_graph_flow -platform offscreen)
+set_tests_properties(integration.widgets_graph PROPERTIES TIMEOUT 30)
 
 qt_add_executable(tst_task_creation_flow
     integration/tst_TaskCreationFlow.cpp
@@ -344,9 +360,11 @@ set_tests_properties(
     viewmodel.contracts
     view.widgets_settings
     view.widgets_tasks
+    view.widgets_graph
     integration.widgets_appearance
     integration.widgets_tasks
     integration.widgets_category_dependencies
+    integration.widgets_graph
     integration.task_creation_flow
     view.qml_pickers
     view.qml_dependency_graph

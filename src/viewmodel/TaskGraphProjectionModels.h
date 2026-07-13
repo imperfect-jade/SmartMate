@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/TaskGraph.h"
+#include "viewmodel/contracts/TaskGraphContract.h"
 
 #include <QAbstractListModel>
 #include <QPointF>
@@ -28,20 +29,20 @@ struct RelationProjection final {
 class TaskGraphEdgeListModel final : public QAbstractListModel {
 public:
     enum Role {
-        PredecessorIdRole = Qt::UserRole + 1,
-        SuccessorIdRole,
-        RoutePointsRole,
-        ArrowTipXRole,
-        ArrowTipYRole,
-        ArrowLeftXRole,
-        ArrowLeftYRole,
-        ArrowRightXRole,
-        ArrowRightYRole,
-        SatisfiedRole,
-        CancelledRole,
-        HighlightedRole,
-        DimmedRole,
-        HoveredRole,
+        PredecessorIdRole = TaskGraphContract::EdgePredecessorIdRole,
+        SuccessorIdRole = TaskGraphContract::EdgeSuccessorIdRole,
+        RoutePointsRole = TaskGraphContract::EdgeRoutePointsRole,
+        ArrowTipXRole = TaskGraphContract::EdgeArrowTipXRole,
+        ArrowTipYRole = TaskGraphContract::EdgeArrowTipYRole,
+        ArrowLeftXRole = TaskGraphContract::EdgeArrowLeftXRole,
+        ArrowLeftYRole = TaskGraphContract::EdgeArrowLeftYRole,
+        ArrowRightXRole = TaskGraphContract::EdgeArrowRightXRole,
+        ArrowRightYRole = TaskGraphContract::EdgeArrowRightYRole,
+        SatisfiedRole = TaskGraphContract::EdgeSatisfiedRole,
+        CancelledRole = TaskGraphContract::EdgeCancelledRole,
+        HighlightedRole = TaskGraphContract::EdgeHighlightedRole,
+        DimmedRole = TaskGraphContract::EdgeDimmedRole,
+        HoveredRole = TaskGraphContract::EdgeHoveredRole,
     };
 
     explicit TaskGraphEdgeListModel(QObject *parent);
@@ -64,10 +65,10 @@ private:
 class TaskGraphRelationListModel final : public QAbstractListModel {
 public:
     enum Role {
-        TaskIdRole = Qt::UserRole + 1,
-        TitleRole,
-        StatusTextRole,
-        RelationTextRole,
+        TaskIdRole = TaskGraphContract::RelationTaskIdRole,
+        TitleRole = TaskGraphContract::RelationTitleRole,
+        StatusTextRole = TaskGraphContract::RelationStatusTextRole,
+        RelationTextRole = TaskGraphContract::RelationTextRole,
     };
 
     explicit TaskGraphRelationListModel(QObject *parent);

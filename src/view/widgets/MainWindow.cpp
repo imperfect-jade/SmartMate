@@ -2,6 +2,7 @@
 
 #include "view/widgets/settings/SettingsPage.h"
 #include "view/widgets/task/TaskPage.h"
+#include "view/widgets/graph/DependencyGraphPage.h"
 #include "view/widgets/theme/WidgetTheme.h"
 
 #include <QApplication>
@@ -11,6 +12,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QVBoxLayout>
@@ -58,7 +60,12 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
                                dependencies.taskDetails,
                                dependencies.taskEditor,
                                dependencies.taskCategories,
-                               dependencies.taskDependencies}}, parent)
+                               dependencies.taskDependencies}},
+                 new DependencyGraphPage{{dependencies.appearanceSettings,
+                                          dependencies.taskGraph,
+                                          dependencies.taskDetails,
+                                          dependencies.taskDependencies}},
+                 parent)
 {
     auto *taskPage = qobject_cast<TaskPage *>(m_pages->widget(0));
     connect(taskPage, &TaskPage::showDependencyGraphRequested, m_pages,
@@ -77,22 +84,31 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
     connect(&dependencies.taskDependencies,
             &viewmodel::TaskDependencyContract::notificationRaised,
             this, &MainWindow::showNotification);
+    connect(&dependencies.taskGraph,
+            &viewmodel::TaskGraphContract::notificationRaised,
+            this, &MainWindow::showNotification);
 }
 
 MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
                        QWidget *parent)
     : MainWindow(appearanceSettings,
                  migrationPlaceholder(tr("任务"), tr("任务页面未注入测试依赖。")),
+                 migrationPlaceholder(tr("依赖图"), tr("依赖图页面未注入测试依赖。")),
                  parent)
 {
 }
 
 MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
-                       QWidget *taskPage, QWidget *parent)
+                       QWidget *taskPage, QWidget *graphPage, QWidget *parent)
     : QMainWindow(parent)
     , m_appearanceSettings(appearanceSettings)
     , m_baselineFont(QApplication::font())
     , m_pages(new QStackedWidget(this))
+    , m_navigation(new QFrame(this))
+    , m_brand(new QLabel(QStringLiteral("SmartMate"), m_navigation))
+    , m_taskNavigation(nullptr)
+    , m_graphNavigation(nullptr)
+    , m_settingsNavigation(nullptr)
 {
     setObjectName(QStringLiteral("mainWindow"));
     setWindowTitle(QCoreApplication::applicationName().isEmpty()
@@ -108,42 +124,41 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
     rootLayout->setSpacing(0);
     setCentralWidget(central);
 
-    auto *navigation = new QFrame(central);
-    navigation->setObjectName(QStringLiteral("navigationPanel"));
-    navigation->setFixedWidth(208);
-    auto *navigationLayout = new QVBoxLayout(navigation);
+    m_navigation->setParent(central);
+    m_navigation->setObjectName(QStringLiteral("navigationPanel"));
+    m_navigation->setFixedWidth(208);
+    auto *navigationLayout = new QVBoxLayout(m_navigation);
     navigationLayout->setContentsMargins(14, 18, 14, 18);
     navigationLayout->setSpacing(8);
 
-    auto *brand = new QLabel{QStringLiteral("SmartMate")};
-    brand->setObjectName(QStringLiteral("sectionTitle"));
-    navigationLayout->addWidget(brand);
+    m_brand->setObjectName(QStringLiteral("sectionTitle"));
+    m_brand->setAlignment(Qt::AlignCenter);
+    navigationLayout->addWidget(m_brand);
     navigationLayout->addSpacing(18);
 
     auto *navigationGroup = new QButtonGroup(this);
     navigationGroup->setExclusive(true);
-    auto *taskButton = navigationButton(tr("任务"),
+    m_taskNavigation = navigationButton(tr("任务"),
                                         QStringLiteral("taskNavigationButton"),
                                         *navigationGroup,
                                         *navigationLayout, 0);
-    taskButton->setAccessibleName(tr("任务"));
-    navigationButton(tr("依赖图"), QStringLiteral("graphNavigationButton"),
-                     *navigationGroup, *navigationLayout, 1);
-    navigationButton(tr("设置"), QStringLiteral("settingsNavigationButton"),
-                     *navigationGroup, *navigationLayout, 2);
+    m_taskNavigation->setAccessibleName(tr("任务"));
+    m_graphNavigation = navigationButton(tr("依赖图"), QStringLiteral("graphNavigationButton"),
+                                         *navigationGroup, *navigationLayout, 1);
+    m_settingsNavigation = navigationButton(tr("设置"), QStringLiteral("settingsNavigationButton"),
+                                            *navigationGroup, *navigationLayout, 2);
     navigationLayout->addStretch();
 
-    rootLayout->addWidget(navigation);
+    rootLayout->addWidget(m_navigation);
     rootLayout->addWidget(m_pages, 1);
 
     m_pages->addWidget(taskPage);
-    m_pages->addWidget(migrationPlaceholder(
-        tr("依赖图"), tr("依赖图将在后续阶段使用 QGraphicsView 迁移。")));
+    m_pages->addWidget(graphPage);
     m_pages->addWidget(new SettingsPage{appearanceSettings, m_pages});
 
     connect(navigationGroup, &QButtonGroup::idClicked, m_pages,
             [this](const int index) { m_pages->setCurrentIndex(index); });
-    taskButton->setChecked(true);
+    m_taskNavigation->setChecked(true);
     m_pages->setCurrentIndex(0);
 
     statusBar()->setObjectName(QStringLiteral("notificationStatusBar"));
@@ -154,6 +169,26 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
             &viewmodel::AppearanceSettingsContract::notificationRaised,
             this, &MainWindow::showNotification);
     applyAppearance();
+    applyNavigationMode();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    applyNavigationMode();
+}
+
+void MainWindow::applyNavigationMode()
+{
+    const bool compact = width() < 1040;
+    m_navigation->setFixedWidth(compact ? 64 : 208);
+    m_brand->setText(compact ? QStringLiteral("S") : QStringLiteral("SmartMate"));
+    m_taskNavigation->setText(compact ? QStringLiteral("✓") : tr("任务"));
+    m_graphNavigation->setText(compact ? QStringLiteral("↗") : tr("依赖图"));
+    m_settingsNavigation->setText(compact ? QStringLiteral("⚙") : tr("设置"));
+    m_taskNavigation->setToolTip(compact ? tr("任务") : QString{});
+    m_graphNavigation->setToolTip(compact ? tr("依赖图") : QString{});
+    m_settingsNavigation->setToolTip(compact ? tr("设置") : QString{});
 }
 
 void MainWindow::applyAppearance()

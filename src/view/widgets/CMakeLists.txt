@@ -11,6 +11,8 @@ add_library(smartmate_widgets STATIC
     task/TaskItemDelegate.cpp
     task/TaskEditorDialog.h
     task/TaskEditorDialog.cpp
+    task/TaskDetailsDialog.h
+    task/TaskDetailsDialog.cpp
     task/TaskCategoryDialog.h
     task/TaskCategoryDialog.cpp
     task/TaskCreationPredecessorDialog.h
@@ -21,6 +23,12 @@ add_library(smartmate_widgets STATIC
     task/DeadlinePickerDialog.cpp
     task/DurationPickerDialog.h
     task/DurationPickerDialog.cpp
+    graph/DependencyGraphPage.h
+    graph/DependencyGraphPage.cpp
+    graph/DependencyGraphView.h
+    graph/DependencyGraphView.cpp
+    graph/TaskGraphItems.h
+    graph/TaskGraphItems.cpp
     theme/WidgetTheme.h
     theme/WidgetTheme.cpp
 )

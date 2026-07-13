@@ -193,6 +193,8 @@ void ViewModelContractsTest::concreteMetaObjectsExposeInheritedQmlApi()
     QVERIFY(graphMeta.indexOfProperty("edges") >= 0);
     QVERIFY(hasMetaMethod(graphMeta, QByteArrayLiteral("selectTask")));
     QVERIFY(graphMeta.indexOfEnumerator("EmphasisLevel") >= 0);
+    QVERIFY(graphMeta.indexOfEnumerator("EdgeRole") >= 0);
+    QVERIFY(graphMeta.indexOfEnumerator("RelationRole") >= 0);
 
     const QMetaObject &editorMeta = viewmodel::TaskEditorViewModel::staticMetaObject;
     QVERIFY(editorMeta.indexOfProperty("deadlineDisplayText") >= 0);
@@ -224,6 +226,14 @@ void ViewModelContractsTest::listImplementationsRespectTheItemModelProtocol()
         &editor, QAbstractItemModelTester::FailureReportingMode::QtTest};
     QAbstractItemModelTester graphTester{
         &graph, QAbstractItemModelTester::FailureReportingMode::QtTest};
+    QAbstractItemModelTester edgeTester{
+        graph.edges(), QAbstractItemModelTester::FailureReportingMode::QtTest};
+    QAbstractItemModelTester predecessorTester{
+        graph.selectedPredecessors(),
+        QAbstractItemModelTester::FailureReportingMode::QtTest};
+    QAbstractItemModelTester successorTester{
+        graph.selectedSuccessors(),
+        QAbstractItemModelTester::FailureReportingMode::QtTest};
     QAbstractItemModelTester listTester{
         &list, QAbstractItemModelTester::FailureReportingMode::QtTest};
 
@@ -231,6 +241,12 @@ void ViewModelContractsTest::listImplementationsRespectTheItemModelProtocol()
     QCOMPARE(dependency.rowCount(), 0);
     QCOMPARE(editor.rowCount(), 0);
     QCOMPARE(graph.rowCount(), 0);
+    QCOMPARE(graph.edges()->roleNames().value(
+                 viewmodel::TaskGraphContract::EdgeRoutePointsRole),
+             QByteArrayLiteral("routePoints"));
+    QCOMPARE(graph.selectedPredecessors()->roleNames().value(
+                 viewmodel::TaskGraphContract::RelationTaskIdRole),
+             QByteArrayLiteral("taskId"));
     QCOMPARE(list.rowCount(), 0);
 }
 

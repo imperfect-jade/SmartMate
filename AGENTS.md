@@ -125,6 +125,8 @@ ctest --preset debug --output-on-failure -R "view.widgets|integration.widgets"
 
 阶段 4 的类别与依赖编辑迁移已完成。类别筛选与命令必须使用稳定 `TaskCategoryId`，创建前置集合只能作为 `TaskEditorContract` 草稿一次提交，已有任务依赖只能通过 `TaskDependencyContract::save()` 原子替换；Widget 不得遍历候选重建规则或循环调用持久化命令。
 
+阶段 5 的依赖图迁移已完成。Graph Widget 只能读取 `TaskGraphContract` 的节点、边和关系 Role；拓扑层级、闭包、类别裁剪、边满足状态、节点坐标、正交路径与箭头顶点必须继续由 Model/ViewModel 投影，`QGraphicsView/QGraphicsScene` 只负责绘制、缩放、平移、选中和稳定 `TaskId` 转发。
+
 完整 `ctest` 仍是最终验收命令，上述筛选只用于 Widgets 开发时快速定位回归。最终删除 QML 后才移除 `all_qmllint`。
 
 禁止提交构建产物、运行数据库、IDE用户配置、凭据、生成缓存或无关改动。

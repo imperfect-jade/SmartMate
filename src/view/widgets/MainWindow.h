@@ -7,6 +7,10 @@
 #include <QMainWindow>
 
 class QStackedWidget;
+class QFrame;
+class QLabel;
+class QPushButton;
+class QResizeEvent;
 
 namespace smartmate::view::widgets {
 
@@ -21,15 +25,24 @@ public:
     explicit MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
                         QWidget *parent = nullptr);
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
     MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
-               QWidget *taskPage, QWidget *parent);
+               QWidget *taskPage, QWidget *graphPage, QWidget *parent);
     void applyAppearance();
+    void applyNavigationMode();
     void showNotification(const common::UiNotification &notification);
 
     viewmodel::AppearanceSettingsContract &m_appearanceSettings;
     QFont m_baselineFont;
     QStackedWidget *m_pages;
+    QFrame *m_navigation;
+    QLabel *m_brand;
+    QPushButton *m_taskNavigation;
+    QPushButton *m_graphNavigation;
+    QPushButton *m_settingsNavigation;
 };
 
 } // namespace smartmate::view::widgets

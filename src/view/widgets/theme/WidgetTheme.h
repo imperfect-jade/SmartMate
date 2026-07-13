@@ -22,6 +22,8 @@ struct WidgetTheme {
     QColor surface;
     QColor surfaceSubtle;
     QColor surfaceStrong;
+    QColor surfaceElevated;
+    QColor controlHover;
     QColor border;
     QColor borderSoft;
     QColor borderStrong;
@@ -29,9 +31,16 @@ struct WidgetTheme {
     QColor textBody;
     QColor textSecondary;
     QColor textMuted;
+    QColor textDisabled;
+    QColor todo;
     QColor inProgress;
+    QColor done;
+    QColor cancelled;
+    QColor archived;
     QColor warning;
     QColor danger;
+
+    [[nodiscard]] QColor statusColor(int statusIndex) const;
 
     [[nodiscard]] static WidgetTheme fromAccentIndex(int accentThemeIndex);
     [[nodiscard]] QPalette palette() const;

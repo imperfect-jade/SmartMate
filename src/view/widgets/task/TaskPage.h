@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QDialog>
 #include <QFrame>
 #include <QListView>
 #include <QWidget>
@@ -34,6 +33,7 @@ struct TaskPageDependencies {
 class TaskCategoryDialog;
 class TaskDependencyDialog;
 class TaskEditorDialog;
+class TaskDetailsDialog;
 
 class TaskListView final : public QListView {
     Q_OBJECT
@@ -65,29 +65,6 @@ private:
     QLabel *m_meta;
     QPushButton *m_details;
     QPushButton *m_primary;
-};
-
-class TaskDetailsDialog final : public QDialog {
-    Q_OBJECT
-public:
-    explicit TaskDetailsDialog(viewmodel::TaskDetailsContract &details,
-                               QWidget *parent = nullptr);
-    bool openTask(const QString &taskId);
-signals:
-    void editRequested(const QString &taskId);
-    void editDependenciesRequested(const QString &taskId);
-protected:
-    void done(int result) override;
-private:
-    void synchronize();
-    viewmodel::TaskDetailsContract &m_details;
-    QLabel *m_title;
-    QLabel *m_summary;
-    QLabel *m_description;
-    QLabel *m_schedule;
-    QLabel *m_insight;
-    QPushButton *m_edit;
-    QPushButton *m_editDependencies;
 };
 
 /// 任务主流程页面，只组合抽象 Contract 并转发稳定 TaskId。

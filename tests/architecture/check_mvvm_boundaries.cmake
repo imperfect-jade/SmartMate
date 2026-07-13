@@ -390,6 +390,41 @@ if(EXISTS "${dependency_widget}")
     endif()
 endif()
 
+foreach(stage5_widget IN ITEMS DependencyGraphPage DependencyGraphView TaskGraphItems)
+    set(stage5_source "${ROOT_DIR}/src/view/widgets/graph/${stage5_widget}.cpp")
+    if(NOT EXISTS "${stage5_source}")
+        record_violation("${ROOT_DIR}/src/view/widgets/CMakeLists.txt"
+            "${stage5_widget} is required by the dependency graph migration")
+    endif()
+endforeach()
+
+file(GLOB_RECURSE graph_widget_sources LIST_DIRECTORIES FALSE
+    "${ROOT_DIR}/src/view/widgets/graph/*.h"
+    "${ROOT_DIR}/src/view/widgets/graph/*.cpp")
+foreach(graph_source IN LISTS graph_widget_sources)
+    file(READ "${graph_source}" graph_contents)
+    string(TOLOWER "${graph_contents}" graph_lower)
+    if(graph_lower MATCHES "rolenames[ \t\r\n]*[(]")
+        record_violation("${graph_source}"
+            "Graph Widgets must use stable Contract roles instead of roleName reflection")
+    endif()
+    if(graph_lower MATCHES "adjacency|topological|predecessorclosure|successorclosure|depth[ _-]*first|breadth[ _-]*first")
+        record_violation("${graph_source}"
+            "Graph traversal, topology, and closure calculations must stay outside Widgets")
+    endif()
+endforeach()
+
+set(graph_items "${ROOT_DIR}/src/view/widgets/graph/TaskGraphItems.cpp")
+if(EXISTS "${graph_items}")
+    file(READ "${graph_items}" graph_item_contents)
+    if(NOT graph_item_contents MATCHES "EdgeRoutePointsRole"
+       OR NOT graph_item_contents MATCHES "NodeXRole"
+       OR NOT graph_item_contents MATCHES "NodeYRole")
+        record_violation("${graph_items}"
+            "Graph items must draw Contract-projected node coordinates and edge routes")
+    endif()
+endif()
+
 get_property(violations GLOBAL PROPERTY MVVM_VIOLATIONS)
 if(violations)
     string(REPLACE ";" "\n  - " formatted_violations "${violations}")

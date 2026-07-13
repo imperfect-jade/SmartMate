@@ -15,6 +15,8 @@ WidgetTheme WidgetTheme::fromAccentIndex(const int accentThemeIndex)
         QColor{blue ? "#f8fbff" : "#fafdf5"},
         QColor{blue ? "#ecf3fc" : "#f0f6e7"},
         QColor{blue ? "#e0ecfa" : "#e4eed3"},
+        QColor{"#ffffff"},
+        QColor{blue ? "#e4effc" : "#eaf2dd"},
         QColor{blue ? "#abc4e4" : "#a9be7b"},
         QColor{blue ? "#ceddf0" : "#cdddb0"},
         QColor{blue ? "#769ac8" : "#719847"},
@@ -22,10 +24,26 @@ WidgetTheme WidgetTheme::fromAccentIndex(const int accentThemeIndex)
         QColor{blue ? "#294765" : "#354b2e"},
         QColor{blue ? "#496783" : "#506449"},
         QColor{blue ? "#61778e" : "#677761"},
+        QColor{"#98a2b3"},
+        QColor{"#175cd3"},
         QColor{"#387a4a"},
+        QColor{"#067647"},
+        QColor{"#667085"},
+        QColor{"#475467"},
         QColor{"#b54708"},
         QColor{"#b42318"},
     };
+}
+
+QColor WidgetTheme::statusColor(const int statusIndex) const
+{
+    switch (statusIndex) {
+    case 0: return todo;
+    case 1: return inProgress;
+    case 2: return done;
+    case 3: return cancelled;
+    default: return archived;
+    }
 }
 
 QPalette WidgetTheme::palette() const

@@ -84,6 +84,34 @@ public:
     };
     Q_ENUM(EmphasisLevel)
 
+    /// edges() 子模型的稳定 Role；Widget 不得通过 roleName 字符串反射读取边。
+    enum EdgeRole {
+        EdgePredecessorIdRole = Qt::UserRole + 1,
+        EdgeSuccessorIdRole,
+        EdgeRoutePointsRole,
+        EdgeArrowTipXRole,
+        EdgeArrowTipYRole,
+        EdgeArrowLeftXRole,
+        EdgeArrowLeftYRole,
+        EdgeArrowRightXRole,
+        EdgeArrowRightYRole,
+        EdgeSatisfiedRole,
+        EdgeCancelledRole,
+        EdgeHighlightedRole,
+        EdgeDimmedRole,
+        EdgeHoveredRole,
+    };
+    Q_ENUM(EdgeRole)
+
+    /// selectedPredecessors()/selectedSuccessors() 子模型的稳定 Role。
+    enum RelationRole {
+        RelationTaskIdRole = Qt::UserRole + 1,
+        RelationTitleRole,
+        RelationStatusTextRole,
+        RelationTextRole,
+    };
+    Q_ENUM(RelationRole)
+
     ~TaskGraphContract() override = default;
 
     [[nodiscard]] virtual QAbstractItemModel *edges() noexcept = 0;

@@ -3,6 +3,7 @@
 #include "view/widgets/theme/WidgetTheme.h"
 
 #include <QComboBox>
+#include <QFrame>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -139,6 +140,14 @@ void SettingsWidgetsTest::initialStateAndNavigationAreSynchronized()
     QTest::mouseClick(requiredChild<QPushButton>(window, "settingsNavigationButton"),
                       Qt::LeftButton);
     QCOMPARE(pages->currentIndex(), 2);
+
+    window.show();
+    window.resize(900, 620);
+    QCoreApplication::processEvents();
+    QCOMPARE(requiredChild<QFrame>(window, "navigationPanel")->width(), 64);
+    window.resize(1180, 760);
+    QCoreApplication::processEvents();
+    QCOMPARE(requiredChild<QFrame>(window, "navigationPanel")->width(), 208);
 }
 
 void SettingsWidgetsTest::userEventsInvokeStronglyTypedCommands()
