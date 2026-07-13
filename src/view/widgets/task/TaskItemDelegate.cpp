@@ -32,6 +32,17 @@ QRect TaskItemDelegate::menuRect(const QRect &rect) const
     return {rect.right() - 44, rect.center().y() - 17, 34, 34};
 }
 
+QRect TaskItemDelegate::dragHandleRect(const QRect &itemRect,
+                                       const QModelIndex &index) const
+{
+    if (m_tasks.bulkSelectionMode()
+        || !index.data(Role::CanStartRole).toBool()) {
+        return {};
+    }
+    const QRect card = itemRect.adjusted(2, 4, -2, -4);
+    return {card.left() + 12, card.center().y() - 22, 34, 44};
+}
+
 void TaskItemDelegate::paint(QPainter *painter,
                              const QStyleOptionViewItem &option,
                              const QModelIndex &index) const
@@ -53,7 +64,16 @@ void TaskItemDelegate::paint(QPainter *painter,
                                         : option.palette.highlight());
     painter->drawRoundedRect(QRect{card.left(), card.top(), 5, card.height()}, 2, 2);
 
-    QRect textRect = card.adjusted(18, 10, -160, -10);
+    const QRect dragHandle = dragHandleRect(option.rect, index);
+    if (!dragHandle.isEmpty()) {
+        QStyleOptionButton handle;
+        handle.rect = dragHandle;
+        handle.text = QStringLiteral("⠿");
+        handle.state = QStyle::State_Enabled;
+        QApplication::style()->drawControl(QStyle::CE_PushButton, &handle, painter);
+    }
+
+    QRect textRect = card.adjusted(dragHandle.isEmpty() ? 18 : 58, 10, -160, -10);
     QFont titleFont = option.font;
     titleFont.setBold(true);
     titleFont.setPointSizeF(titleFont.pointSizeF() + 1.5);
@@ -64,11 +84,12 @@ void TaskItemDelegate::paint(QPainter *painter,
 
     painter->setFont(option.font);
     painter->setPen(option.palette.color(QPalette::PlaceholderText));
-    const QString meta = QStringLiteral("%1 · %2优先级%3")
+    const QString meta = QStringLiteral("%1 · %2优先级%3%4")
         .arg(index.data(Role::StatusTextRole).toString(),
              index.data(Role::PriorityTextRole).toString(),
              index.data(Role::DeadlineTextRole).toString().isEmpty()
-                 ? QString{} : QStringLiteral(" · 截止 %1").arg(index.data(Role::DeadlineTextRole).toString()));
+                 ? QString{} : QStringLiteral(" · 截止 %1").arg(index.data(Role::DeadlineTextRole).toString()),
+             overdue ? QStringLiteral(" · 已逾期") : QString{});
     painter->drawText(textRect.adjusted(0, 30, 0, 0), Qt::AlignLeft | Qt::AlignTop, meta);
     QString reason = blocked
         ? QStringLiteral("阻塞：%1").arg(index.data(Role::BlockingReasonTextRole).toString())

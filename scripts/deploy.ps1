@@ -70,8 +70,6 @@ $cmakeCommand = Get-Command cmake.exe -ErrorAction Stop
 $preset = $Configuration.ToLowerInvariant()
 $buildDirectory = Join-Path $repositoryRoot "build/$preset"
 $sourceExecutable = Join-Path $buildDirectory 'SmartMate.exe'
-$qmlSourceDirectory = Join-Path $repositoryRoot 'src/view/qml'
-$qmlImportDirectory = Join-Path $buildDirectory 'qml'
 # Debug构建不等于一定安装了Debug版Qt；先探测DLL，再选择windeployqt运行库模式。
 $debugRuntimeCandidates = @(
     (Join-Path $qtBinDirectory 'Qt6Cored.dll'),
@@ -108,16 +106,16 @@ $env:PATH = "$qtBinDirectory;$mingwBinDirectory;$env:PATH"
 
 Push-Location $repositoryRoot
 try {
-    Write-Host "[1/4] Configure the $Configuration build"
+    Write-Host "[1/5] Configure the Widgets-only $Configuration build"
     Invoke-CheckedCommand `
         -Executable $cmakeCommand.Source `
-        -Arguments @('--preset', $preset) `
+        -Arguments @('--preset', $preset, '-DSMARTMATE_BUILD_QML_BASELINE=OFF') `
         -FailureMessage 'CMake configuration failed'
 
-    Write-Host '[2/4] Build SmartMate'
+    Write-Host '[2/5] Build the official SmartMate target'
     Invoke-CheckedCommand `
         -Executable $cmakeCommand.Source `
-        -Arguments @('--build', '--preset', $preset) `
+        -Arguments @('--build', '--preset', $preset, '--target', 'SmartMate') `
         -FailureMessage 'CMake build failed'
 
     if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
@@ -133,21 +131,18 @@ try {
     $deployedExecutable = Join-Path $distributionDirectory 'SmartMate.exe'
     Copy-Item -LiteralPath $sourceExecutable -Destination $deployedExecutable
 
-    Write-Host '[3/4] Collect Qt, QML, and MinGW runtime files'
+    Write-Host '[3/5] Collect Qt Widgets and MinGW runtime files'
     if ($Configuration -eq 'Debug' -and -not $hasDebugQtRuntime) {
         Write-Host 'Qt debug DLLs are not installed; deploy the Debug build with the matching release Qt runtime.'
     }
-    # windeployqt扫描QML导入并收集Qt/MinGW运行库；qoffscreen供无界面启动验证使用。
+    # 正式程序只允许扫描可执行文件的 Widgets 依赖；qoffscreen供发布目录冒烟测试使用。
     $deployArguments = @(
         "--$runtimeMode",
         '--compiler-runtime',
         '--no-system-dxc-compiler',
         '--include-plugins', 'qoffscreen',
-        '--skip-plugin-types', 'qmltooling',
         '--translations', 'zh_CN,en',
         '--verbose', '0',
-        '--qmldir', $qmlSourceDirectory,
-        '--qmlimport', $qmlImportDirectory,
         '--dir', $distributionDirectory,
         $deployedExecutable
     )
@@ -162,7 +157,7 @@ try {
         'SmartMate.exe',
         "Qt6Core$debugSuffix.dll",
         "Qt6Gui$debugSuffix.dll",
-        "Qt6Qml$debugSuffix.dll",
+        "Qt6Widgets$debugSuffix.dll",
         "Qt6Sql$debugSuffix.dll",
         'libgcc_s_seh-1.dll',
         'libstdc++-6.dll',
@@ -185,7 +180,36 @@ try {
         throw "Required deployment files are missing: $($missingFiles -join ', ')"
     }
 
-    Write-Host '[4/4] Deployment validation passed'
+    $forbiddenRuntimeFiles = @(
+        foreach ($pattern in @('Qt6Qml*.dll', 'Qt6Quick*.dll', 'Qt6QuickControls2*.dll')) {
+            Get-ChildItem -Path (Join-Path $distributionDirectory $pattern) `
+                -File -ErrorAction SilentlyContinue
+        }
+    )
+    $deployedQmlDirectory = Join-Path $distributionDirectory 'qml'
+    if ($forbiddenRuntimeFiles.Count -gt 0 -or
+        (Test-Path -LiteralPath $deployedQmlDirectory)) {
+        $forbiddenNames = @($forbiddenRuntimeFiles | ForEach-Object { $_.Name })
+        if (Test-Path -LiteralPath $deployedQmlDirectory) {
+            $forbiddenNames += 'qml/'
+        }
+        throw "QML/Qt Quick files were unexpectedly deployed: $($forbiddenNames -join ', ')"
+    }
+
+    Write-Host '[4/5] Run the deployed executable with only packaged runtimes'
+    $originalPath = $env:PATH
+    try {
+        $env:PATH = "$distributionDirectory;$env:SystemRoot;$env:SystemRoot\System32"
+        Invoke-CheckedCommand `
+            -Executable $deployedExecutable `
+            -Arguments @('--smoke-test', '-platform', 'offscreen') `
+            -FailureMessage 'Deployed SmartMate smoke test failed'
+    }
+    finally {
+        $env:PATH = $originalPath
+    }
+
+    Write-Host '[5/5] Deployment validation passed'
     Write-Host "Output directory: $distributionDirectory"
     Write-Host 'Distribute the entire directory, not SmartMate.exe by itself.'
 }

@@ -148,6 +148,8 @@ void SettingsWidgetsTest::initialStateAndNavigationAreSynchronized()
     window.resize(1180, 760);
     QCoreApplication::processEvents();
     QCOMPARE(requiredChild<QFrame>(window, "navigationPanel")->width(), 208);
+    QCOMPARE(pages->currentIndex(), 2);
+    QVERIFY(requiredChild<QPushButton>(window, "settingsNavigationButton")->isChecked());
 }
 
 void SettingsWidgetsTest::userEventsInvokeStronglyTypedCommands()

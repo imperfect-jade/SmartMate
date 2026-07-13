@@ -220,13 +220,29 @@ set(app_cmake "${ROOT_DIR}/src/app/CMakeLists.txt")
 if(EXISTS "${app_cmake}")
     file(READ "${app_cmake}" app_cmake_contents)
     string(TOLOWER "${app_cmake_contents}" app_cmake_lower)
-    string(FIND "${app_cmake_lower}" "qt_add_executable(smartmatewidgets" widgets_target_start)
-    if(widgets_target_start GREATER_EQUAL 0)
-        string(SUBSTRING "${app_cmake_lower}" ${widgets_target_start} -1 widgets_target_section)
-        if(widgets_target_section MATCHES "smartmate_(ui|viewmodel_qml)|qt6::(qml|quick)")
+    string(FIND "${app_cmake_lower}" "qt_add_executable(smartmate win32" official_target_start)
+    string(FIND "${app_cmake_lower}" "if(smartmate_build_qml_baseline)" baseline_guard_start)
+    if(official_target_start LESS 0 OR baseline_guard_start LESS 0)
+        record_violation("${app_cmake}"
+            "The official SmartMate Widgets target and guarded QML baseline are required")
+    else()
+        math(EXPR official_target_length
+            "${baseline_guard_start} - ${official_target_start}")
+        string(SUBSTRING "${app_cmake_lower}" ${official_target_start}
+            ${official_target_length} official_target_section)
+        if(NOT official_target_section MATCHES "smartmate_widgets"
+           OR NOT official_target_section MATCHES "qt6::widgets")
             record_violation("${app_cmake}"
-                "SmartMateWidgets may not link the migration QML frontend")
+                "The official SmartMate target must link smartmate_widgets and Qt Widgets")
         endif()
+        if(official_target_section MATCHES "smartmate_(ui|viewmodel_qml)|qt6::(qml|quick)")
+            record_violation("${app_cmake}"
+                "The official SmartMate target may not link the migration QML frontend")
+        endif()
+    endif()
+    if(app_cmake_lower MATCHES "smartmatewidgets")
+        record_violation("${app_cmake}"
+            "The temporary SmartMateWidgets target must not remain after the entry switch")
     endif()
 endif()
 

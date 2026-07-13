@@ -1,14 +1,13 @@
 # Windows 部署与 Qt DLL 排障
 
-> **迁移状态**：本文描述当前 QML 行为基线的有效部署流程。Qt Widgets 版本接管正式 `SmartMate` 前，QML 模块、`--qmldir` 和相关 DLL 仍必须部署；切换完成后将按[Qt Widgets 迁移指南](widgets-migration.md)统一删除这些步骤并重新验证发布目录。临时 `SmartMateWidgets` 不作为正式分发目标。
+> **迁移状态**：Qt Widgets 已接管正式 `SmartMate`。旧 `SmartMateQmlBaseline` 只用于删除门禁前的开发期对照，不进入发布目录；发布脚本始终关闭 QML 基线并验证纯 Widgets 运行时闭包。
 
 ## 1. 为什么会提示缺少 DLL
 
 CMake 构建得到的 `SmartMate.exe` 只包含 SmartMate 自身代码。Qt 默认使用动态链接，程序启动时还要加载：
 
-- Qt 基础库，如 `Qt6Core.dll`、`Qt6Gui.dll`、`Qt6Qml.dll` 和 `Qt6Quick.dll`；
+- Qt 基础库，如 `Qt6Core.dll`、`Qt6Gui.dll`、`Qt6Widgets.dll` 和 `Qt6Sql.dll`；
 - Qt 平台插件，如 `platforms/qwindows.dll`；
-- QML 模块及其插件；
 - SQLite 运行库与数据库驱动，如 `Qt6Sql.dll` 和 `sqldrivers/qsqlite.dll`；
 - MinGW 运行库，如 `libgcc_s_seh-1.dll`、`libstdc++-6.dll` 和 `libwinpthread-1.dll`。
 
@@ -30,7 +29,7 @@ $env:PATH="$env:QT_ROOT/bin;$env:QT_MINGW_ROOT/bin;$env:PATH"
 
 ## 3. 正确的 Release 发布方法
 
-仓库中的部署脚本会执行 Release 构建，调用同一 Qt 安装目录下的 `windeployqt.exe`，复制可执行文件、所需 Qt DLL、QML 模块、平台插件与 MinGW 运行库：
+仓库中的部署脚本会关闭临时 QML 基线、只构建正式 `SmartMate`，再调用同一 Qt 安装目录下的 `windeployqt.exe`，复制所需 Qt Widgets DLL、平台插件与 MinGW 运行库：
 
 ```powershell
 $env:QT_ROOT='D:/Qt/6.10.2/mingw_64'
@@ -48,11 +47,13 @@ dist/SmartMate/
   SmartMate.exe
   Qt6Core.dll
   Qt6Gui.dll
+  Qt6Widgets.dll
+  Qt6Sql.dll
   ...
   platforms/
     qwindows.dll
-  qml/
-    ...
+  sqldrivers/
+    qsqlite.dll
 ```
 
 分发时应压缩并复制整个 `dist/SmartMate` 目录，不能只发送 `SmartMate.exe`。`dist/` 是本地生成物，已被 `.gitignore` 排除，不应提交到源码仓库。
@@ -69,13 +70,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy.ps1 -Config
 
 只按错误提示复制 `Qt6Core.dll`，下一次启动通常还会继续缺少其他库或插件；复制到错误版本的同名 DLL 还可能导致入口点不存在、程序崩溃或 ABI 不兼容。
 
-`windeployqt` 会扫描可执行文件和 QML 导入，按当前 Qt Kit 复制相互匹配的依赖。项目脚本还使用 `--compiler-runtime` 部署 MinGW 运行库，因此它比手工复制可靠，也便于在答辩前重复生成干净发布包。
+`windeployqt` 会扫描正式可执行文件的链接依赖，按当前 Qt Kit 复制相互匹配的运行库。项目脚本还使用 `--compiler-runtime` 部署 MinGW 运行库，因此它比手工复制可靠，也便于在答辩前重复生成干净发布包。脚本不会传递 `--qmldir` 或 `--qmlimport`。
 
 不要从互联网 DLL 下载网站获取文件，也不要把 DLL 复制到 `C:/Windows/System32`。这些做法会污染系统环境，并可能带来版本冲突和安全风险。
 
 ## 5. 常见错误与处理
 
-### “找不到 Qt6Core.dll / Qt6Qml.dll”
+### “找不到 Qt6Core.dll / Qt6Widgets.dll”
 
 原因：运行了未部署的构建目录可执行文件，且 Qt 的 `bin` 不在 `PATH`。
 
@@ -99,11 +100,11 @@ dist/SmartMate/platforms/qwindows.dll
 
 删除旧的 `dist/SmartMate` 后重新运行部署脚本。脚本本身会安全地重建该目录。
 
-### “module \"QtQuick\"/\"QtQuick.Controls\" is not installed”
+### 发布目录意外出现 Qt6Qml、Qt6Quick 或 `qml/`
 
-原因：只复制了 DLL，没有部署 QML 模块，或者部署时没有扫描项目 QML 源码。
+原因：部署了旧 QML 基线，或在未清理的目录上手工覆盖文件。
 
-处理：使用本项目脚本；它会把 `src/view/qml` 传给 `windeployqt --qmldir`，并指定构建出的 QML 模块目录。
+处理：重新运行项目脚本。脚本会安全重建 `dist/SmartMate`，并在发现任何 QML/Qt Quick 运行库时直接失败。
 
 ### “QSQLITE driver not loaded”
 
@@ -119,9 +120,9 @@ dist/SmartMate/platforms/qwindows.dll
 
 ## 6. 发布前验证
 
-1. 运行 Release 部署脚本，确认脚本没有报告缺失文件。
-2. 从 `dist/SmartMate/SmartMate.exe` 启动，而不是从 `build/` 启动。
-3. 临时使用不包含 Qt 和 MinGW 的 `PATH` 执行离屏冒烟测试，确认依赖来自发布目录。
+1. 运行 Release 部署脚本，确认必需 DLL 检查和离屏冒烟测试均通过。
+2. 确认发布目录不存在 `Qt6Qml*`、`Qt6Quick*`、`Qt6QuickControls2*` 或 `qml/`。
+3. 从 `dist/SmartMate/SmartMate.exe` 启动，而不是从 `build/` 启动。
 4. 最可靠的最终检查是在一台没有安装 Qt 的 Windows 10/11 机器或虚拟机中复制整个目录并运行。
 5. 若程序可以启动但目标机器缺少 Microsoft 系统组件，应安装官方 Windows 更新或 Microsoft 运行时，不能使用第三方 DLL 下载站补文件。
 

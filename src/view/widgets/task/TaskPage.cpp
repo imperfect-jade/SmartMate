@@ -13,18 +13,23 @@
 #include "viewmodel/contracts/TaskListContract.h"
 
 #include <QAbstractItemModel>
+#include <QApplication>
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDrag>
 #include <QDragEnterEvent>
+#include <QDragLeaveEvent>
 #include <QDropEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -36,14 +41,18 @@ TaskListView::TaskListView(QWidget *parent) : QListView(parent)
 {
     setObjectName(QStringLiteral("taskListView"));
     setSelectionMode(QAbstractItemView::SingleSelection);
-    setDragEnabled(true);
+    // 原生 item drag 依赖模型 flags，且会把整张卡片变为拖拽源；这里由 View
+    // 显式识别专用拖拽柄，资格仍只读取 Contract 的 CanStartRole。
+    setDragEnabled(false);
+    setMouseTracking(true);
     setSpacing(2);
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 }
 
 void TaskListView::startDrag(Qt::DropActions)
 {
-    const QModelIndex index = currentIndex();
+    const QModelIndex index = m_dragCandidate.isValid()
+        ? QModelIndex(m_dragCandidate) : currentIndex();
     if (!index.isValid() || !index.data(ListRole::CanStartRole).toBool()) return;
     auto *mime = new QMimeData;
     mime->setData(QString::fromLatin1(taskMimeType),
@@ -51,7 +60,90 @@ void TaskListView::startDrag(Qt::DropActions)
     mime->setText(index.data(ListRole::TitleRole).toString());
     auto *drag = new QDrag(this);
     drag->setMimeData(mime);
+    QPixmap preview(280, 66);
+    preview.fill(Qt::transparent);
+    QPainter painter(&preview);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(palette().highlight().color(), 2));
+    painter.setBrush(palette().base());
+    painter.drawRoundedRect(preview.rect().adjusted(1, 1, -2, -2), 11, 11);
+    QFont handleFont = font();
+    handleFont.setPointSizeF(handleFont.pointSizeF() + 4);
+    painter.setFont(handleFont);
+    painter.setPen(palette().highlight().color());
+    painter.drawText(QRect{10, 0, 34, preview.height()}, Qt::AlignCenter,
+                     QStringLiteral("⠿"));
+    QFont titleFont = font();
+    titleFont.setBold(true);
+    painter.setFont(titleFont);
+    painter.setPen(palette().text().color());
+    painter.drawText(QRect{50, 9, 218, 24}, Qt::AlignLeft | Qt::AlignVCenter,
+                     painter.fontMetrics().elidedText(
+                         index.data(ListRole::TitleRole).toString(),
+                         Qt::ElideRight, 218));
+    painter.setFont(font());
+    painter.setPen(palette().placeholderText().color());
+    painter.drawText(QRect{50, 34, 218, 22}, Qt::AlignLeft | Qt::AlignVCenter,
+                     tr("%1 · 拖到“现在做”开始")
+                         .arg(index.data(ListRole::StatusTextRole).toString()));
+    painter.end();
+    drag->setPixmap(preview);
+    drag->setHotSpot({22, preview.height() / 2});
+    emit taskDragStarted(index.data(ListRole::TaskIdRole).toString());
     drag->exec(Qt::MoveAction);
+    drag->deleteLater();
+}
+
+void TaskListView::mousePressEvent(QMouseEvent *event)
+{
+    const QModelIndex index = indexAt(event->position().toPoint());
+    const auto *delegate = qobject_cast<TaskItemDelegate *>(itemDelegate());
+    if (event->button() == Qt::LeftButton && index.isValid() && delegate
+        && delegate->dragHandleRect(visualRect(index), index)
+               .contains(event->position().toPoint())) {
+        m_dragCandidate = index;
+        m_dragStartPosition = event->position().toPoint();
+        setCurrentIndex(index);
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    clearDragCandidate();
+    QListView::mousePressEvent(event);
+}
+
+void TaskListView::mouseMoveEvent(QMouseEvent *event)
+{
+    if (m_dragCandidate.isValid()) {
+        if (!(event->buttons() & Qt::LeftButton)) {
+            clearDragCandidate();
+            return;
+        }
+        if ((event->position().toPoint() - m_dragStartPosition).manhattanLength()
+            >= QApplication::startDragDistance()) {
+            event->accept();
+            startDrag(Qt::MoveAction);
+            clearDragCandidate();
+        }
+        return;
+    }
+    QListView::mouseMoveEvent(event);
+}
+
+void TaskListView::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (m_dragCandidate.isValid() && event->button() == Qt::LeftButton) {
+        clearDragCandidate();
+        event->accept();
+        return;
+    }
+    QListView::mouseReleaseEvent(event);
+}
+
+void TaskListView::clearDragCandidate()
+{
+    m_dragCandidate = QPersistentModelIndex{};
+    viewport()->unsetCursor();
 }
 
 TaskFocusPanel::TaskFocusPanel(viewmodel::TaskFocusContract &focus,
@@ -64,6 +156,8 @@ TaskFocusPanel::TaskFocusPanel(viewmodel::TaskFocusContract &focus,
 {
     setObjectName(QStringLiteral("focusTaskSlot"));
     setFrameShape(QFrame::StyledPanel);
+    setMinimumHeight(148);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     setAcceptDrops(true);
     auto *layout = new QHBoxLayout(this);
     auto *text = new QVBoxLayout;
@@ -100,6 +194,15 @@ TaskFocusPanel::TaskFocusPanel(viewmodel::TaskFocusContract &focus,
 void TaskFocusPanel::synchronize()
 {
     const auto state = m_focus.focusState();
+    if (m_dragActive) {
+        m_title->setText(tr("释放以开始任务"));
+        m_description->setText(tr("任务资格和依赖约束将由任务服务最终校验。"));
+        m_meta->clear();
+        m_details->hide();
+        m_primary->hide();
+        return;
+    }
+    m_primary->show();
     if (state == viewmodel::TaskFocusContract::FocusState::AllBlocked) {
         m_title->setText(tr("当前任务都被前置条件阻塞"));
         m_description->setText(tr("打开依赖图查看阻塞关系。"));
@@ -117,6 +220,7 @@ void TaskFocusPanel::synchronize()
     }
     QStringList meta{m_focus.focusStatusText(), m_focus.focusPriorityText()};
     if (!m_focus.focusDeadlineText().isEmpty()) meta << tr("截止 %1").arg(m_focus.focusDeadlineText());
+    if (m_focus.focusOverdue()) meta << tr("已逾期");
     if (m_focus.focusHasCategory()) meta << m_focus.focusCategoryName();
     m_meta->setText(meta.join(QStringLiteral(" · ")));
     m_details->setVisible(!m_focus.focusTaskId().isEmpty());
@@ -124,16 +228,56 @@ void TaskFocusPanel::synchronize()
 
 void TaskFocusPanel::dragEnterEvent(QDragEnterEvent *event)
 {
-    if (event->mimeData()->hasFormat(QString::fromLatin1(taskMimeType))) event->acceptProposedAction();
+    const bool canAccept = m_focus.focusState()
+            != viewmodel::TaskFocusContract::FocusState::InProgress
+        && event->mimeData()->hasFormat(QString::fromLatin1(taskMimeType))
+        && !event->mimeData()->data(QString::fromLatin1(taskMimeType)).isEmpty();
+    if (!canAccept) {
+        event->ignore();
+        return;
+    }
+    setDragActive(true);
+    event->acceptProposedAction();
+}
+
+void TaskFocusPanel::dragLeaveEvent(QDragLeaveEvent *event)
+{
+    setDragActive(false);
+    event->accept();
 }
 
 void TaskFocusPanel::dropEvent(QDropEvent *event)
 {
     const QString id = QString::fromUtf8(event->mimeData()->data(QString::fromLatin1(taskMimeType)));
-    if (!id.isEmpty()) {
+    const bool canAccept = m_focus.focusState()
+            != viewmodel::TaskFocusContract::FocusState::InProgress
+        && event->mimeData()->hasFormat(QString::fromLatin1(taskMimeType))
+        && !id.isEmpty();
+    setDragActive(false);
+    if (canAccept) {
         event->acceptProposedAction();
         m_tasks.startTask(id);
+    } else {
+        event->ignore();
     }
+}
+
+void TaskFocusPanel::setDragActive(const bool active)
+{
+    if (m_dragActive == active) return;
+    m_dragActive = active;
+    if (active) {
+        const QColor primary = palette().highlight().color();
+        setStyleSheet(QStringLiteral(
+            "QFrame#focusTaskSlot { background: rgba(%1, %2, %3, 32); "
+            "border: 2px solid %4; border-radius: 12px; }")
+            .arg(primary.red()).arg(primary.green()).arg(primary.blue())
+            .arg(primary.name()));
+    } else {
+        setStyleSheet({});
+    }
+    update();
+    synchronize();
 }
 
 TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
@@ -150,7 +294,8 @@ TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
     , m_bulkArchive(new QPushButton(tr("批量归档"), m_bulkBar))
     , m_bulkRestore(new QPushButton(tr("批量恢复"), m_bulkBar))
     , m_bulkDelete(new QPushButton(tr("批量永久删除"), m_bulkBar))
-    , m_list(new TaskListView(this)), m_empty(new QLabel(this))
+    , m_content(new QStackedWidget(this)), m_empty(new QLabel(m_content))
+    , m_list(new TaskListView(m_content))
     , m_details(new TaskDetailsDialog(dependencies.taskDetails, this))
     , m_editor(new TaskEditorDialog(dependencies.taskEditor, this))
     , m_categories(new TaskCategoryDialog(dependencies.taskCategories, this))
@@ -199,8 +344,12 @@ TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
     bulkLayout->addWidget(clear); bulkLayout->addWidget(exit);
     root->addWidget(m_bulkBar);
     m_empty->setObjectName(QStringLiteral("taskEmptyStateLabel"));
-    m_empty->setAlignment(Qt::AlignCenter); root->addWidget(m_empty);
-    root->addWidget(m_list, 1);
+    m_empty->setAlignment(Qt::AlignCenter);
+    m_content->setObjectName(QStringLiteral("taskContentStack"));
+    m_content->setFrameShape(QFrame::NoFrame);
+    m_content->addWidget(m_empty);
+    m_content->addWidget(m_list);
+    root->addWidget(m_content, 1);
 
     m_list->setModel(&dependencies.taskList);
     auto *delegate = new TaskItemDelegate(dependencies.taskList, m_list);
@@ -318,8 +467,8 @@ void TaskPage::updateControls()
     m_bulkArchive->setVisible(!tasks.showArchived()); m_bulkArchive->setEnabled(tasks.canBulkArchive());
     m_bulkRestore->setVisible(tasks.showArchived()); m_bulkRestore->setEnabled(tasks.canBulkRestore());
     m_bulkDelete->setVisible(tasks.showArchived()); m_bulkDelete->setEnabled(tasks.canBulkDelete());
-    m_empty->setVisible(tasks.count() == 0);
-    m_list->setVisible(tasks.count() > 0);
+    m_content->setCurrentWidget(tasks.count() == 0
+        ? static_cast<QWidget *>(m_empty) : static_cast<QWidget *>(m_list));
     m_empty->setText(tasks.hasActiveFilters() ? tr("没有符合当前搜索和筛选条件的任务")
         : tasks.showArchived() ? tr("还没有归档任务") : tr("还没有任务，从新建一项开始吧"));
     m_list->viewport()->update();

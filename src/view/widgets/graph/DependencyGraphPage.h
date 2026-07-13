@@ -49,6 +49,7 @@ private:
     void synchronizeDetails();
     void synchronizeRelations();
     void applyTheme();
+    void applyDetailsTheme();
     void updateResponsiveLayout();
     void setDetailsExpanded(bool expanded);
     void selectAndCenter(const QString &taskId);
@@ -73,8 +74,10 @@ private:
     QToolButton *m_pinDetails;
     QLabel *m_selectedTitle;
     QLabel *m_selectedCategory;
+    QLabel *m_selectedContext;
     QLabel *m_selectedMeta;
     QLabel *m_selectedDescription;
+    QFrame *m_detailsDivider;
     QLabel *m_selectedDeadline;
     QLabel *m_selectedDuration;
     QLabel *m_selectedRelations;

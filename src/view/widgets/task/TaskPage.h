@@ -2,12 +2,16 @@
 
 #include <QFrame>
 #include <QListView>
+#include <QPersistentModelIndex>
 #include <QWidget>
 
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QDragLeaveEvent;
+class QMouseEvent;
+class QStackedWidget;
 class QToolButton;
 
 namespace smartmate::viewmodel {
@@ -39,8 +43,18 @@ class TaskListView final : public QListView {
     Q_OBJECT
 public:
     explicit TaskListView(QWidget *parent = nullptr);
+signals:
+    /// 仅表示 View 已建立原生拖拽会话，供展示反馈和手势回归测试使用。
+    void taskDragStarted(const QString &taskId);
 protected:
     void startDrag(Qt::DropActions supportedActions) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+private:
+    void clearDragCandidate();
+    QPersistentModelIndex m_dragCandidate;
+    QPoint m_dragStartPosition;
 };
 
 class TaskFocusPanel final : public QFrame {
@@ -55,8 +69,10 @@ signals:
     void dependencyGraphRequested();
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragLeaveEvent(QDragLeaveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
 private:
+    void setDragActive(bool active);
     void synchronize();
     viewmodel::TaskFocusContract &m_focus;
     viewmodel::TaskListContract &m_tasks;
@@ -65,6 +81,7 @@ private:
     QLabel *m_meta;
     QPushButton *m_details;
     QPushButton *m_primary;
+    bool m_dragActive{false};
 };
 
 /// 任务主流程页面，只组合抽象 Contract 并转发稳定 TaskId。
@@ -97,8 +114,9 @@ private:
     QPushButton *m_bulkArchive;
     QPushButton *m_bulkRestore;
     QPushButton *m_bulkDelete;
-    TaskListView *m_list;
+    QStackedWidget *m_content;
     QLabel *m_empty;
+    TaskListView *m_list;
     TaskDetailsDialog *m_details;
     TaskEditorDialog *m_editor;
     TaskCategoryDialog *m_categories;

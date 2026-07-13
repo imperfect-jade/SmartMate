@@ -32,6 +32,11 @@ public:
     { return parent.isValid() ? 0 : rows.size(); }
     QVariant data(const QModelIndex &index, int role) const override
     { return index.isValid() && index.row() < rows.size() ? rows.at(index.row()).value(role) : QVariant{}; }
+    void setRole(const int row, const int role, const QVariant &value)
+    {
+        rows[row][role] = value;
+        emit dataChanged(index(row), index(row), {role});
+    }
     QList<QHash<int, QVariant>> rows;
 };
 
@@ -206,6 +211,8 @@ class GraphWidgetsTest final : public QObject {
 private slots:
     void projectedGeometryAndStableCommandsDriveTheView();
     void bindingZoomDetailsAndNotificationsMatchTheBaseline();
+    void detailsPanelUsesScopedBorderlessVisualHierarchy();
+    void edgeStylesAndToolbarCommandsFollowContractProjection();
 };
 
 void GraphWidgetsTest::projectedGeometryAndStableCommandsDriveTheView()
@@ -261,6 +268,88 @@ void GraphWidgetsTest::bindingZoomDetailsAndNotificationsMatchTheBaseline()
     graph.raiseError();
     QTRY_VERIFY(child<QLabel>(page, "graphNotificationLabel")->isVisible());
     QCOMPARE(child<QLabel>(page, "graphNotificationLabel")->text(), QStringLiteral("读取失败"));
+}
+
+void GraphWidgetsTest::detailsPanelUsesScopedBorderlessVisualHierarchy()
+{
+    FakeAppearance appearance; FakeGraph graph; FakeDetails details; FakeDependency dependencies;
+    view::widgets::DependencyGraphPage page{{appearance, graph, details, dependencies}};
+    page.resize(920, 700);
+    page.show();
+    QVERIFY(graph.selectTask(QString::fromLatin1(secondId)));
+
+    auto *panel = child<QFrame>(page, "dependencyGraphDetails");
+    QTRY_VERIFY(panel->isVisible());
+    QVERIFY(panel->styleSheet().contains(QStringLiteral("QFrame#dependencyGraphDetails")));
+    QVERIFY(!panel->styleSheet().contains(QStringLiteral("QFrame {")));
+
+    auto *title = child<QLabel>(page, "selectedGraphTaskTitle");
+    auto *category = child<QLabel>(page, "selectedGraphTaskCategory");
+    auto *context = child<QLabel>(page, "selectedGraphTaskContext");
+    auto *description = child<QLabel>(page, "selectedGraphTaskDescription");
+    auto *deadline = child<QLabel>(page, "selectedGraphTaskDeadline");
+    auto *blocking = child<QLabel>(page, "selectedGraphTaskBlockingReason");
+    QVERIFY(title->styleSheet().contains(QStringLiteral("border: none")));
+    QVERIFY(description->styleSheet().contains(QStringLiteral("border: none")));
+    QVERIFY(deadline->styleSheet().contains(QStringLiteral("border: none")));
+    QVERIFY(category->styleSheet().contains(QStringLiteral("border: 1px solid")));
+    QVERIFY(category->isVisible());
+    QVERIFY(!context->isVisible());
+    QVERIFY(blocking->isVisible());
+    QVERIFY(blocking->styleSheet().contains(QStringLiteral("border: none")));
+
+    auto *divider = child<QFrame>(page, "graphDetailsDivider");
+    QCOMPARE(divider->frameShape(), QFrame::HLine);
+    QVERIFY(divider->styleSheet().contains(QStringLiteral("QFrame#graphDetailsDivider")));
+    auto *predecessors = child<QListView>(page, "graphPredecessorList");
+    auto *successors = child<QListView>(page, "graphSuccessorList");
+    QCOMPARE(predecessors->frameShape(), QFrame::NoFrame);
+    QCOMPARE(successors->frameShape(), QFrame::NoFrame);
+
+    const QString greenTitleStyle = title->styleSheet();
+    appearance.setAccentThemeIndex(1);
+    QVERIFY(title->styleSheet() != greenTitleStyle);
+}
+
+void GraphWidgetsTest::edgeStylesAndToolbarCommandsFollowContractProjection()
+{
+    FakeAppearance appearance; FakeGraph graph; FakeDetails details; FakeDependency dependencies;
+    view::widgets::DependencyGraphPage page{{appearance, graph, details, dependencies}};
+    page.resize(920, 700);
+    page.show();
+    auto *view = page.findChild<view::widgets::DependencyGraphView *>(
+        QStringLiteral("dependencyGraphViewport"));
+    QVERIFY(view);
+    view::widgets::TaskGraphEdgeItem *edge = nullptr;
+    for (QGraphicsItem *item : view->scene()->items()) {
+        if (auto *candidate = dynamic_cast<view::widgets::TaskGraphEdgeItem *>(item)) {
+            edge = candidate;
+            break;
+        }
+    }
+    QVERIFY(edge);
+
+    const auto theme = view::widgets::WidgetTheme::fromAccentIndex(0);
+    QCOMPARE(edge->presentationPen().color(), theme.warning);
+    QCOMPARE(edge->presentationPen().widthF(), 2.2);
+    QCOMPARE(edge->presentationPen().style(), Qt::SolidLine);
+
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeSatisfiedRole, true);
+    QCOMPARE(edge->presentationPen().color(), theme.done);
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeSatisfiedRole, false);
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeCancelledRole, true);
+    QCOMPARE(edge->presentationPen().color(), theme.textDisabled);
+    QCOMPARE(edge->presentationPen().style(), Qt::CustomDashLine);
+
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeCancelledRole, false);
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeHighlightedRole, true);
+    QCOMPARE(edge->presentationPen().widthF(), 4.0);
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeHighlightedRole, false);
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeHoveredRole, true);
+    QCOMPARE(edge->presentationPen().widthF(), 4.0);
+    graph.edgeModel.setRole(0, viewmodel::TaskGraphContract::EdgeDimmedRole, true);
+    QCOMPARE(edge->opacity(), 0.24);
+
 }
 
 QTEST_MAIN(GraphWidgetsTest)

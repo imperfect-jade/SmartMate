@@ -4,6 +4,8 @@
 #include "view/widgets/task/TaskCategoryDialog.h"
 #include "view/widgets/task/TaskCreationPredecessorDialog.h"
 #include "view/widgets/task/TaskDependencyDialog.h"
+#include "view/widgets/task/TaskEditorDialog.h"
+#include "view/widgets/task/TaskItemDelegate.h"
 #include "viewmodel/contracts/TaskCategoryContract.h"
 #include "viewmodel/contracts/TaskDependencyContract.h"
 #include "viewmodel/contracts/TaskDetailsContract.h"
@@ -14,16 +16,24 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QComboBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
 #include <QMessageBox>
+#include <QMimeData>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QSignalBlocker>
+#include <QStackedWidget>
 #include <QTest>
 #include <QTimer>
+
+#include <algorithm>
 
 using namespace smartmate;
 
@@ -47,10 +57,10 @@ void answerNextConfirmation(const QMessageBox::StandardButton answer)
 class FakeTaskList final : public viewmodel::TaskListContract {
 public:
     FakeTaskList() : TaskListContract(nullptr) {}
-    int rowCount(const QModelIndex &parent = {}) const override { return parent.isValid() ? 0 : 1; }
-    int count() const noexcept override { return 1; }
+    int rowCount(const QModelIndex &parent = {}) const override { return parent.isValid() ? 0 : rows; }
+    int count() const noexcept override { return rows; }
     QVariant data(const QModelIndex &index, int role) const override {
-        if (!index.isValid() || index.row() != 0) return {};
+        if (!index.isValid() || index.row() < 0 || index.row() >= rows) return {};
         switch (role) {
         case TaskIdRole: return QString::fromLatin1(taskId);
         case TitleRole: return QStringLiteral("契约任务");
@@ -58,7 +68,11 @@ public:
         case StatusTextRole: return QStringLiteral("待办");
         case PriorityTextRole: return QStringLiteral("高");
         case OrderReasonTextRole: return QStringLiteral("高优先");
-        case CanEditTaskRole: case CanEditDependenciesRole: case CanStartRole: case CanCancelRole:
+        case OverdueRole: return overdue;
+        case BlockedRole: return blocked;
+        case BlockingReasonTextRole: return blocked ? QStringLiteral("等待前置任务") : QString{};
+        case CanStartRole: return canStart;
+        case CanEditTaskRole: case CanEditDependenciesRole: case CanCancelRole:
         case BulkSelectableRole: return true;
         default: return false;
         }
@@ -86,7 +100,7 @@ public:
     void setPriorityFilterIndex(int value) override { ++priorityCalls; priority = value; emit priorityFilterIndexChanged(); }
     bool setCategoryFilter(int mode, const QString &id) override { ++categoryCalls; categoryMode = mode; category = id; emit categoryFilterChanged(); emit hasActiveFiltersChanged(); return true; }
     void reload() override {}
-    void clearFilters() override { search.clear(); priority = 0; categoryMode = 0; category.clear(); emit searchTextChanged(); emit priorityFilterIndexChanged(); emit categoryFilterChanged(); emit hasActiveFiltersChanged(); }
+    void clearFilters() override { ++clearFilterCalls; search.clear(); priority = 0; categoryMode = 0; category.clear(); emit searchTextChanged(); emit priorityFilterIndexChanged(); emit categoryFilterChanged(); emit hasActiveFiltersChanged(); }
     bool startTask(const QString &id) override { ++startCalls; lastId = id; return true; }
     bool cancelTask(const QString &id) override { ++cancelCalls; lastId = id; return true; }
     bool completeTask(const QString &id) override { ++completeCalls; lastId = id; return true; }
@@ -104,11 +118,15 @@ public:
     bool deleteSelectedArchivedTasks() override { ++bulkDeleteCalls; return true; }
 
     void pushSearch(QString value) { search = std::move(value); emit searchTextChanged(); }
-    bool archived{false}, bulk{false}, selected{false};
+    void setRows(const int value) { beginResetModel(); rows = value; endResetModel(); emit countChanged(); }
+    int rows{1};
+    bool archived{false}, bulk{false}, selected{false}, overdue{false}, blocked{false};
+    bool canStart{true};
     QString search, lastId, category; int priority{0}, categoryMode{0};
     int searchCalls{0}, priorityCalls{0}, categoryCalls{0}, showArchivedCalls{0}, startCalls{0};
     int cancelCalls{0}, completeCalls{0}, redoCalls{0}, archiveCalls{0}, restoreCalls{0}, deleteCalls{0};
     int bulkArchiveCalls{0}, bulkRestoreCalls{0}, bulkDeleteCalls{0};
+    int clearFilterCalls{0};
 };
 
 class FakeFocus final : public viewmodel::TaskFocusContract {
@@ -215,9 +233,9 @@ public:
     bool canConfigurePredecessors() const noexcept override { return !edit; }
     bool beginCreate() override { ++beginCreateCalls; edit = false; active = true; emit modeChanged(); emit sessionActiveChanged(); return true; }
     bool beginEdit(const QString &) override { ++beginEditCalls; edit = true; active = true; emit modeChanged(); emit sessionActiveChanged(); return true; }
-    bool setDeadlineSelection(int, int, int, int, int) override { return true; }
+    bool setDeadlineSelection(int year, int month, int day, int hour, int minute) override { ++deadlineWrites; deadlineSelection = {year, month, day, hour, minute}; return true; }
     void clearDeadline() override {}
-    bool setEstimatedDuration(int, int, int) override { return true; }
+    bool setEstimatedDuration(int days, int hours, int minutes) override { ++durationWrites; durationSelection = {days, hours, minutes}; return true; }
     void clearEstimatedDuration() override {}
     void beginPredecessorSelection() override { ++beginPredecessorCalls; pickerSelected = acceptedSelected; emit predecessorSelectionChanged(); }
     bool setCreationPredecessorSelected(const QString &id, bool value) override { ++predecessorWrites; lastPredecessorId = id; pickerSelected = value; emit dataChanged(index(0), index(0), {CandidateSelectedRole}); emit predecessorSelectionChanged(); return true; }
@@ -232,6 +250,8 @@ public:
     int beginCreateCalls{0}, beginEditCalls{0}, titleWrites{0}, descriptionWrites{0};
     int beginPredecessorCalls{0}, predecessorWrites{0}, acceptPredecessorCalls{0};
     int cancelPredecessorCalls{0}, clearPredecessorCalls{0};
+    int deadlineWrites{0}, durationWrites{0};
+    QList<int> deadlineSelection, durationSelection;
 };
 
 class FakeCategory final : public viewmodel::TaskCategoryContract {
@@ -320,6 +340,9 @@ private slots:
     void typedPickersPreserveValuesAndContractBounds();
     void categoryAndDependencyDialogsUseStableContractCommands();
     void creationPredecessorSelectionCommitsOrRestoresLocalDraft();
+    void filtersDetailsDragAndConfirmationsPreserveStableCommands();
+    void emptyLayoutAndDedicatedDragHandleRemainStable();
+    void editorPickersCommitOnceAndFitMinimumWindow();
 };
 
 void TaskWidgetsTest::initialBindingAndUserCommandsUseContracts()
@@ -502,6 +525,238 @@ void TaskWidgetsTest::creationPredecessorSelectionCommitsOrRestoresLocalDraft()
     QCOMPARE(editor.acceptPredecessorCalls, 1);
     QVERIFY(editor.acceptedSelected);
     QTRY_VERIFY(!dialog.isVisible());
+}
+
+void TaskWidgetsTest::filtersDetailsDragAndConfirmationsPreserveStableCommands()
+{
+    FakeTaskList tasks; FakeFocus focus; FakeDetails details; FakeEditor editor;
+    FakeCategory categories; FakeDependency dependencies;
+    tasks.rows = 0;
+    tasks.search = QStringLiteral("无结果");
+    view::widgets::TaskPage page{{tasks, focus, details, editor,
+                                  categories, dependencies}};
+    page.resize(900, 620);
+    page.show();
+
+    auto *empty = page.findChild<QLabel *>(QStringLiteral("taskEmptyStateLabel"));
+    QTRY_VERIFY(empty && empty->isVisible());
+    QVERIFY(empty->text().contains(QStringLiteral("搜索和筛选")));
+    QTest::mouseClick(page.findChild<QPushButton *>(QStringLiteral("clearFiltersButton")),
+                      Qt::LeftButton);
+    QCOMPARE(tasks.clearFilterCalls, 1);
+
+    tasks.setRows(1);
+    auto *list = page.findChild<view::widgets::TaskListView *>(
+        QStringLiteral("taskListView"));
+    QVERIFY(list);
+    list->activated(tasks.index(0));
+    QTRY_COMPARE(details.selectCalls, 1);
+    QCOMPARE(details.id, QString::fromLatin1(taskId));
+
+    QMimeData mime;
+    mime.setData(QStringLiteral("application/x-smartmate-task-id"),
+                 QByteArray(taskId));
+    auto *focusPanel = page.findChild<view::widgets::TaskFocusPanel *>(
+        QStringLiteral("focusTaskSlot"));
+    QVERIFY(focusPanel);
+    QDragEnterEvent enter{{10, 10}, Qt::MoveAction, &mime,
+                          Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(focusPanel, &enter);
+    QDropEvent drop{{10.0, 10.0}, Qt::MoveAction, &mime,
+                    Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(focusPanel, &drop);
+    QCOMPARE(tasks.startCalls, 1);
+    QCOMPARE(tasks.lastId, QString::fromLatin1(taskId));
+
+    auto *delegate = qobject_cast<view::widgets::TaskItemDelegate *>(
+        list->itemDelegate());
+    QVERIFY(delegate);
+    answerNextConfirmation(QMessageBox::Cancel);
+    delegate->cancelRequested(QString::fromLatin1(taskId), QStringLiteral("契约任务"));
+    QCOMPARE(tasks.cancelCalls, 0);
+    answerNextConfirmation(QMessageBox::Ok);
+    delegate->cancelRequested(QString::fromLatin1(taskId), QStringLiteral("契约任务"));
+    QCOMPARE(tasks.cancelCalls, 1);
+
+    tasks.bulk = true;
+    tasks.selected = true;
+    tasks.archived = false;
+    emit tasks.bulkSelectionChanged();
+    answerNextConfirmation(QMessageBox::Cancel);
+    QTest::mouseClick(page.findChild<QPushButton *>(QStringLiteral("bulkArchiveButton")),
+                      Qt::LeftButton);
+    QCOMPARE(tasks.bulkArchiveCalls, 0);
+    answerNextConfirmation(QMessageBox::Ok);
+    QTest::mouseClick(page.findChild<QPushButton *>(QStringLiteral("bulkArchiveButton")),
+                      Qt::LeftButton);
+    QCOMPARE(tasks.bulkArchiveCalls, 1);
+
+    tasks.archived = true;
+    emit tasks.bulkSelectionChanged();
+    answerNextConfirmation(QMessageBox::Ok);
+    QTest::mouseClick(page.findChild<QPushButton *>(QStringLiteral("bulkDeleteButton")),
+                      Qt::LeftButton);
+    QCOMPARE(tasks.bulkDeleteCalls, 1);
+}
+
+void TaskWidgetsTest::emptyLayoutAndDedicatedDragHandleRemainStable()
+{
+    FakeTaskList tasks; FakeFocus focus; FakeDetails details; FakeEditor editor;
+    FakeCategory categories; FakeDependency dependencies;
+    tasks.rows = 0;
+    focus.state = viewmodel::TaskFocusContract::FocusState::NoTasks;
+    focus.id.clear();
+    view::widgets::TaskPage page{{tasks, focus, details, editor,
+                                  categories, dependencies}};
+    page.resize(900, 620);
+    page.show();
+
+    auto *focusPanel = page.findChild<view::widgets::TaskFocusPanel *>(
+        QStringLiteral("focusTaskSlot"));
+    auto *search = page.findChild<QLineEdit *>(QStringLiteral("taskSearchField"));
+    auto *content = page.findChild<QStackedWidget *>(QStringLiteral("taskContentStack"));
+    auto *empty = page.findChild<QLabel *>(QStringLiteral("taskEmptyStateLabel"));
+    auto *list = page.findChild<view::widgets::TaskListView *>(
+        QStringLiteral("taskListView"));
+    QVERIFY(focusPanel && search && content && empty && list);
+    QTRY_VERIFY(page.isVisible());
+    QCOMPARE(content->currentWidget(), static_cast<QWidget *>(empty));
+    QVERIFY(content->height() > empty->sizeHint().height());
+    const int focusTop = focusPanel->mapTo(&page, QPoint{}).y();
+    const int toolbarTop = search->mapTo(&page, QPoint{}).y();
+
+    tasks.setRows(1);
+    QTRY_COMPARE(content->currentWidget(), static_cast<QWidget *>(list));
+    QCOMPARE(focusPanel->mapTo(&page, QPoint{}).y(), focusTop);
+    QCOMPARE(search->mapTo(&page, QPoint{}).y(), toolbarTop);
+    tasks.setRows(0);
+    QTRY_COMPARE(content->currentWidget(), static_cast<QWidget *>(empty));
+    QCOMPARE(focusPanel->mapTo(&page, QPoint{}).y(), focusTop);
+    QCOMPARE(search->mapTo(&page, QPoint{}).y(), toolbarTop);
+
+    tasks.setRows(1);
+    focus.state = viewmodel::TaskFocusContract::FocusState::Suggested;
+    focus.id = QString::fromLatin1(taskId);
+    emit focus.focusTaskChanged();
+    auto *delegate = qobject_cast<view::widgets::TaskItemDelegate *>(list->itemDelegate());
+    QVERIFY(delegate);
+    const QModelIndex index = tasks.index(0);
+    QTRY_VERIFY(!list->visualRect(index).isEmpty());
+    const QRect handle = delegate->dragHandleRect(list->visualRect(index), index);
+    QVERIFY(!handle.isEmpty());
+
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      handle.center());
+    QCOMPARE(details.selectCalls, 0);
+    QCOMPARE(tasks.startCalls, 0);
+
+    QSignalSpy dragStarted(list, &view::widgets::TaskListView::taskDragStarted);
+    QTest::mousePress(list->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      handle.center());
+    const QPoint smallMove = handle.center() + QPoint{
+        std::max(1, QApplication::startDragDistance() - 1), 0};
+    QMouseEvent belowThreshold{QEvent::MouseMove, QPointF{smallMove},
+        QPointF{list->viewport()->mapToGlobal(smallMove)}, Qt::NoButton,
+        Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(list->viewport(), &belowThreshold);
+    QCOMPARE(dragStarted.count(), 0);
+    const QPoint dragMove = handle.center()
+        + QPoint{QApplication::startDragDistance() + 4, 0};
+    QMouseEvent aboveThreshold{QEvent::MouseMove, QPointF{dragMove},
+        QPointF{list->viewport()->mapToGlobal(dragMove)}, Qt::NoButton,
+        Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(list->viewport(), &aboveThreshold);
+    QTRY_COMPARE(dragStarted.count(), 1);
+    QCOMPARE(dragStarted.at(0).at(0).toString(), QString::fromLatin1(taskId));
+
+    tasks.bulk = true;
+    emit tasks.bulkSelectionChanged();
+    QVERIFY(delegate->dragHandleRect(list->visualRect(index), index).isEmpty());
+    tasks.bulk = false;
+    tasks.canStart = false;
+    emit tasks.dataChanged(index, index, {viewmodel::TaskListContract::CanStartRole});
+    QVERIFY(delegate->dragHandleRect(list->visualRect(index), index).isEmpty());
+
+    QMimeData mime;
+    mime.setData(QStringLiteral("application/x-smartmate-task-id"), QByteArray(taskId));
+    focus.state = viewmodel::TaskFocusContract::FocusState::InProgress;
+    emit focus.focusTaskChanged();
+    QDragEnterEvent rejectedEnter{{10, 10}, Qt::MoveAction, &mime,
+                                  Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(focusPanel, &rejectedEnter);
+    QVERIFY(!rejectedEnter.isAccepted());
+    QDropEvent rejectedDrop{{10.0, 10.0}, Qt::MoveAction, &mime,
+                            Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(focusPanel, &rejectedDrop);
+    QCOMPARE(tasks.startCalls, 0);
+}
+
+void TaskWidgetsTest::editorPickersCommitOnceAndFitMinimumWindow()
+{
+    FakeTaskList tasks; FakeFocus focus; FakeDetails details; FakeEditor editor;
+    FakeCategory categories; FakeDependency dependencies;
+    view::widgets::TaskPage page{{tasks, focus, details, editor,
+                                  categories, dependencies}};
+    QFont enlarged = page.font();
+    enlarged.setPointSizeF(enlarged.pointSizeF() * 1.1);
+    page.setFont(enlarged);
+    page.resize(900, 620);
+    page.show();
+    QVERIFY(editor.beginCreate());
+
+    auto *dialog = page.findChild<view::widgets::TaskEditorDialog *>(
+        QStringLiteral("taskEditorDialog"));
+    QTRY_VERIFY(dialog && dialog->isVisible());
+    QVERIFY(dialog->width() <= page.width());
+    QVERIFY(dialog->height() <= page.height());
+
+    QTimer::singleShot(0, [] {
+        auto *picker = qobject_cast<view::widgets::DeadlinePickerDialog *>(
+            QApplication::activeModalWidget());
+        Q_ASSERT(picker);
+        picker->setSelection(2028, 2, 29, 23, 45);
+        picker->accept();
+    });
+    QTest::mouseClick(dialog->findChild<QPushButton *>(
+                          QStringLiteral("openDeadlinePickerButton")),
+                      Qt::LeftButton);
+    QCOMPARE(editor.deadlineWrites, 1);
+    QCOMPARE(editor.deadlineSelection, QList<int>({2028, 2, 29, 23, 45}));
+
+    QTimer::singleShot(0, [] {
+        auto *picker = qobject_cast<view::widgets::DeadlinePickerDialog *>(
+            QApplication::activeModalWidget());
+        Q_ASSERT(picker);
+        picker->reject();
+    });
+    QTest::mouseClick(dialog->findChild<QPushButton *>(
+                          QStringLiteral("openDeadlinePickerButton")),
+                      Qt::LeftButton);
+    QCOMPARE(editor.deadlineWrites, 1);
+
+    QTimer::singleShot(0, [] {
+        auto *picker = qobject_cast<view::widgets::DurationPickerDialog *>(
+            QApplication::activeModalWidget());
+        Q_ASSERT(picker);
+        picker->setDuration(2, 3, 4);
+        picker->accept();
+    });
+    QTest::mouseClick(dialog->findChild<QPushButton *>(
+                          QStringLiteral("openDurationPickerButton")),
+                      Qt::LeftButton);
+    QCOMPARE(editor.durationWrites, 1);
+    QCOMPARE(editor.durationSelection, QList<int>({2, 3, 4}));
+
+    QTimer::singleShot(0, [] {
+        auto *picker = qobject_cast<view::widgets::DurationPickerDialog *>(
+            QApplication::activeModalWidget());
+        Q_ASSERT(picker);
+        picker->reject();
+    });
+    QTest::mouseClick(dialog->findChild<QPushButton *>(
+                          QStringLiteral("openDurationPickerButton")),
+                      Qt::LeftButton);
+    QCOMPARE(editor.durationWrites, 1);
 }
 
 QTEST_MAIN(TaskWidgetsTest)

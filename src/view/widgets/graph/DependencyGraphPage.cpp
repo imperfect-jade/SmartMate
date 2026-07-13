@@ -73,9 +73,17 @@ public:
 
 void setFrameColor(QFrame &frame, const QColor &background, const QColor &border)
 {
+    Q_ASSERT(!frame.objectName().isEmpty());
     frame.setStyleSheet(QStringLiteral(
-        "QFrame { background: %1; border: 1px solid %2; border-radius: 12px; }")
-        .arg(background.name(), border.name()));
+        "QFrame#%1 { background: %2; border: 1px solid %3; border-radius: 12px; }")
+        .arg(frame.objectName(), background.name(), border.name()));
+}
+
+void setLabelColor(QLabel &label, const QColor &color)
+{
+    QPalette palette = label.palette();
+    palette.setColor(QPalette::WindowText, color);
+    label.setPalette(palette);
 }
 
 } // namespace
@@ -93,7 +101,8 @@ DependencyGraphPage::DependencyGraphPage(
     , m_openDetails(new QPushButton(tr("任务详情 ‹"), m_canvasFrame))
     , m_detailsPanel(new QFrame(this)), m_pinDetails(new QToolButton(m_detailsPanel))
     , m_selectedTitle(new QLabel(m_detailsPanel)), m_selectedCategory(new QLabel(m_detailsPanel))
-    , m_selectedMeta(new QLabel(m_detailsPanel)), m_selectedDescription(new QLabel(m_detailsPanel))
+    , m_selectedContext(new QLabel(m_detailsPanel)), m_selectedMeta(new QLabel(m_detailsPanel))
+    , m_selectedDescription(new QLabel(m_detailsPanel)), m_detailsDivider(new QFrame(m_detailsPanel))
     , m_selectedDeadline(new QLabel(m_detailsPanel)), m_selectedDuration(new QLabel(m_detailsPanel))
     , m_selectedRelations(new QLabel(m_detailsPanel)), m_selectedBlocking(new QLabel(m_detailsPanel))
     , m_predecessorHeading(new QLabel(tr("直接前置"), m_detailsPanel))
@@ -200,30 +209,56 @@ DependencyGraphPage::DependencyGraphPage(
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     auto *detailsContent = new QWidget(scroll);
+    detailsContent->setObjectName(QStringLiteral("graphDetailsContent"));
     auto *detailsBody = new QVBoxLayout(detailsContent);
+    detailsBody->setContentsMargins(0, 0, 0, 0);
+    detailsBody->setSpacing(10);
     m_selectedTitle->setObjectName(QStringLiteral("selectedGraphTaskTitle"));
     m_selectedTitle->setWordWrap(true);
+    auto *categoryRow = new QHBoxLayout;
+    categoryRow->setContentsMargins(0, 0, 0, 0);
+    categoryRow->setSpacing(6);
+    m_selectedCategory->setObjectName(QStringLiteral("selectedGraphTaskCategory"));
     m_selectedCategory->setWordWrap(true);
+    m_selectedContext->setObjectName(QStringLiteral("selectedGraphTaskContext"));
+    m_selectedContext->setText(tr("跨类别上下文"));
+    categoryRow->addWidget(m_selectedCategory, 0, Qt::AlignLeft);
+    categoryRow->addWidget(m_selectedContext, 0, Qt::AlignLeft);
+    categoryRow->addStretch();
+    m_selectedMeta->setObjectName(QStringLiteral("selectedGraphTaskMeta"));
     m_selectedMeta->setWordWrap(true);
+    m_selectedDescription->setObjectName(QStringLiteral("selectedGraphTaskDescription"));
     m_selectedDescription->setWordWrap(true);
+    m_detailsDivider->setObjectName(QStringLiteral("graphDetailsDivider"));
+    m_detailsDivider->setFrameShape(QFrame::HLine);
+    m_detailsDivider->setFixedHeight(1);
+    m_selectedDeadline->setObjectName(QStringLiteral("selectedGraphTaskDeadline"));
     m_selectedDeadline->setWordWrap(true);
+    m_selectedDuration->setObjectName(QStringLiteral("selectedGraphTaskDuration"));
     m_selectedDuration->setWordWrap(true);
     m_selectedRelations->setObjectName(QStringLiteral("selectedGraphTaskRelations"));
     m_selectedRelations->setWordWrap(true);
     m_selectedBlocking->setObjectName(QStringLiteral("selectedGraphTaskBlockingReason"));
     m_selectedBlocking->setWordWrap(true);
     detailsBody->addWidget(m_selectedTitle);
-    detailsBody->addWidget(m_selectedCategory);
+    detailsBody->addLayout(categoryRow);
     detailsBody->addWidget(m_selectedMeta);
     detailsBody->addWidget(m_selectedDescription);
+    detailsBody->addWidget(m_detailsDivider);
     detailsBody->addWidget(m_selectedDeadline);
     detailsBody->addWidget(m_selectedDuration);
     detailsBody->addWidget(m_selectedRelations);
     detailsBody->addWidget(m_selectedBlocking);
+    m_predecessors->setObjectName(QStringLiteral("graphPredecessorList"));
+    m_successors->setObjectName(QStringLiteral("graphSuccessorList"));
     m_predecessors->setModel(dependencies.taskGraph.selectedPredecessors());
     m_successors->setModel(dependencies.taskGraph.selectedSuccessors());
     m_predecessors->setItemDelegate(new RelationDelegate(m_predecessors));
     m_successors->setItemDelegate(new RelationDelegate(m_successors));
+    m_predecessors->setFrameShape(QFrame::NoFrame);
+    m_successors->setFrameShape(QFrame::NoFrame);
+    m_predecessors->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_successors->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_predecessors->setMouseTracking(true);
     m_successors->setMouseTracking(true);
     detailsBody->addWidget(m_predecessorHeading);
@@ -414,11 +449,9 @@ void DependencyGraphPage::synchronizeDetails()
     m_selectedTitle->setText(graph.selectedTaskTitle());
     const QString category = graph.selectedHasCategory()
         ? graph.selectedCategoryName() : tr("未分类");
-    m_selectedCategory->setText(graph.selectedCoreNode()
-        ? category : tr("%1 · 跨类别上下文").arg(category));
-    const QColor categoryAccent{graph.selectedCategoryAccent()};
-    m_selectedCategory->setStyleSheet(QStringLiteral(
-        "color: %1; font-weight: 600;").arg(categoryAccent.name()));
+    m_selectedCategory->setText(category);
+    m_selectedCategory->setVisible(graph.selectedHasCategory());
+    m_selectedContext->setVisible(!graph.selectedCoreNode());
     m_selectedMeta->setText(tr("%1 · %2优先级")
         .arg(graph.selectedStatusText(), graph.selectedPriorityText()));
     m_selectedDescription->setText(graph.selectedDescription().isEmpty()
@@ -434,6 +467,7 @@ void DependencyGraphPage::synchronizeDetails()
     m_selectedBlocking->setVisible(!graph.selectedBlockingReason().isEmpty());
     m_editDependencies->setVisible(graph.canEditSelectedDependencies());
     m_openDetails->setVisible(!m_detailsExpanded && !graph.selectedTaskId().isEmpty());
+    applyDetailsTheme();
     synchronizeRelations();
 }
 
@@ -456,9 +490,51 @@ void DependencyGraphPage::applyTheme()
     m_view->setTheme(theme);
     setFrameColor(*m_canvasFrame, theme.surface, theme.border);
     setFrameColor(*m_detailsPanel, theme.surfaceElevated, theme.border);
-    m_notification->setStyleSheet(QStringLiteral("color: %1;").arg(theme.danger.name()));
+    m_notification->setStyleSheet(QStringLiteral(
+        "QLabel#graphNotificationLabel { color: %1; border: none; background: transparent; }")
+        .arg(theme.danger.name()));
+    applyDetailsTheme();
+}
+
+void DependencyGraphPage::applyDetailsTheme()
+{
+    const WidgetTheme theme = WidgetTheme::fromAccentIndex(
+        m_dependencies.appearanceSettings.accentThemeIndex());
+    m_selectedTitle->setStyleSheet(QStringLiteral(
+        "QLabel#selectedGraphTaskTitle { color: %1; font-size: 17px; "
+        "font-weight: 700; border: none; background: transparent; }")
+        .arg(theme.textPrimary.name()));
+    const QColor categoryAccent{m_dependencies.taskGraph.selectedCategoryAccent()};
+    m_selectedCategory->setStyleSheet(QStringLiteral(
+        "QLabel#selectedGraphTaskCategory { color: %1; font-weight: 600; "
+        "padding: 3px 8px; border: 1px solid %1; border-radius: 9px; "
+        "background: rgba(%2, %3, %4, 31); }")
+        .arg(categoryAccent.name())
+        .arg(categoryAccent.red()).arg(categoryAccent.green()).arg(categoryAccent.blue()));
+    for (QLabel *label : {m_selectedContext, m_selectedMeta, m_selectedDeadline,
+                          m_selectedDuration, m_selectedRelations,
+                          m_predecessorHeading, m_successorHeading}) {
+        setLabelColor(*label, theme.textSecondary);
+        label->setStyleSheet(QStringLiteral("border: none; background: transparent;"));
+    }
+    setLabelColor(*m_selectedDescription,
+                  m_dependencies.taskGraph.selectedDescription().isEmpty()
+                      ? theme.textMuted : theme.textBody);
+    m_selectedDescription->setStyleSheet(QStringLiteral(
+        "QLabel#selectedGraphTaskDescription { border: none; background: transparent; }")
+    );
+    m_detailsDivider->setStyleSheet(QStringLiteral(
+        "QFrame#graphDetailsDivider { border: none; background: %1; }")
+        .arg(theme.borderSoft.name()));
+    m_predecessors->setStyleSheet(QStringLiteral(
+        "QListView#graphPredecessorList { border: none; background: transparent; }")
+    );
+    m_successors->setStyleSheet(QStringLiteral(
+        "QListView#graphSuccessorList { border: none; background: transparent; }")
+    );
     m_selectedBlocking->setStyleSheet(QStringLiteral(
-        "background: %1; color: %2; padding: 8px; border-radius: 8px;")
+        "QLabel#selectedGraphTaskBlockingReason { background: %1; color: %2; "
+        "padding: 8px; border: none; border-radius: 8px; }")
         .arg(theme.controlHover.name(), theme.warning.name()));
 }
 

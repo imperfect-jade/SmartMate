@@ -230,6 +230,19 @@ void TaskGraphEdgeItem::refresh(const WidgetTheme &theme)
 void TaskGraphEdgeItem::paint(QPainter *painter,
                               const QStyleOptionGraphicsItem *, QWidget *)
 {
+    const QPen pen = presentationPen();
+    const QColor color = pen.color();
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawPath(m_path);
+    painter->setPen(QPen(color, 1.0));
+    painter->setBrush(color);
+    painter->drawPolygon(m_arrow);
+}
+
+QPen TaskGraphEdgeItem::presentationPen() const
+{
     const bool cancelled = m_index.data(Graph::EdgeCancelledRole).toBool();
     const bool satisfied = m_index.data(Graph::EdgeSatisfiedRole).toBool();
     const bool emphasized = m_index.data(Graph::EdgeHighlightedRole).toBool()
@@ -243,13 +256,7 @@ void TaskGraphEdgeItem::paint(QPainter *painter,
         pen.setStyle(Qt::DashLine);
         pen.setDashPattern({5.0, 4.0});
     }
-    painter->setRenderHint(QPainter::Antialiasing);
-    painter->setPen(pen);
-    painter->setBrush(Qt::NoBrush);
-    painter->drawPath(m_path);
-    painter->setPen(QPen(color, 1.0));
-    painter->setBrush(color);
-    painter->drawPolygon(m_arrow);
+    return pen;
 }
 
 } // namespace smartmate::view::widgets

@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
         }
         return application.exec();
     } catch (const std::exception &error) {
-        qCritical("SmartMate Widgets startup failed: %s", error.what());
+        qCritical("SmartMate startup failed: %s", error.what());
         return EXIT_FAILURE;
     }
 }

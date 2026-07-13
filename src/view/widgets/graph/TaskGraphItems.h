@@ -4,6 +4,7 @@
 
 #include <QGraphicsObject>
 #include <QPainterPath>
+#include <QPen>
 #include <QPersistentModelIndex>
 
 namespace smartmate::viewmodel { class TaskGraphContract; }
@@ -46,6 +47,8 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
                QWidget *widget = nullptr) override;
     void refresh(const WidgetTheme &theme);
+    /// 返回当前 Contract Role 对应的线型，供绘制和语义视觉回归共用。
+    [[nodiscard]] QPen presentationPen() const;
 
 private:
     void rebuildPath();

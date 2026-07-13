@@ -16,6 +16,9 @@ public:
                const QModelIndex &index) const override;
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem &option,
                                  const QModelIndex &index) const override;
+    /// 返回当前卡片中可用于开始任务的专用拖拽柄区域；不具备资格时返回空区域。
+    [[nodiscard]] QRect dragHandleRect(const QRect &itemRect,
+                                       const QModelIndex &index) const;
     bool editorEvent(QEvent *event, QAbstractItemModel *model,
                      const QStyleOptionViewItem &option,
                      const QModelIndex &index) override;

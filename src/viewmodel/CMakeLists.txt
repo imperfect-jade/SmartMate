@@ -43,5 +43,7 @@ target_link_libraries(smartmate_viewmodel
         Qt6::Core
 )
 
-# 迁移期 QML adapter 通过 foreign types 消费具体 ViewModel 元对象。
-qt_extract_metatypes(smartmate_viewmodel)
+if(SMARTMATE_BUILD_QML_BASELINE)
+    # 删除门禁前的 QML adapter 通过 foreign types 消费具体 ViewModel 元对象。
+    qt_extract_metatypes(smartmate_viewmodel)
+endif()
