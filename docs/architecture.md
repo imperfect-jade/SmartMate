@@ -46,7 +46,7 @@ ViewModel 负责：
 
 ViewModel 可以包含用于生成 QML 类型元数据的声明，但不能控制 QML 对象、调用具体持久化实现或包含 SQL、依赖算法和统计公式。
 
-任务列表的搜索词和优先级条件是 ViewModel 持有的会话级展示状态。它们只过滤 Model 已排序的结果，不写入 SQLite 或 `QSettings`，应用重启后恢复默认值。
+任务列表的搜索词、优先级和类别条件是 ViewModel 持有的会话级展示状态。它们只过滤 Model 已排序的结果，不写入 SQLite 或 `QSettings`，应用重启后恢复默认值。任务只保存可空的稳定`TaskCategoryId`，类别名称和固定颜色由独立`TaskCategoryService`提供；因此重命名或换色不会重写任务。只有待办任务可主动调整类别，删除类别则通过原子持久化端口把所有关联任务转为未分类，同时保留状态和依赖。
 
 `TaskDependencyViewModel`维护独立的前置任务选择草稿。打开编辑器时只调用`TaskService::taskDependencyEditContext`，由Model一次性返回目标任务、当前选择、候选范围与`selectable`资格；ViewModel不得再次按任务状态筛选候选。保存时只向Service提交稳定`TaskId`集合，取消时丢弃草稿。它不调用任务列表或任务编辑器，三个子ViewModel只观察同一个`TaskService`。
 
@@ -87,8 +87,8 @@ SmartMate             → persistence + viewmodel + ui 插件
 当前任务 CRUD 使用一条完整纵向链路验证 MVVM 和 QML 类型化注入：
 
 1. `main.cpp` 创建 `QGuiApplication`、`AppBootstrapper` 和 `QQmlApplicationEngine`。
-2. `AppBootstrapper` 按 SQLite Repository、`TaskService`、`AppViewModel` 的顺序创建对象。
-3. `AppViewModel` 拥有任务列表、任务编辑器、依赖编辑器和依赖图四个子 ViewModel，它们只共享同一个 Service。
+2. `AppBootstrapper` 按 SQLite Repository、`TaskService`与`TaskCategoryService`、`AppViewModel` 的顺序创建对象。
+3. `AppViewModel` 拥有任务列表、任务编辑器、类别管理、依赖编辑器和依赖图子 ViewModel；它们可观察同一Model Service，但彼此不直接调用。
 4. 静态 `SmartMate.ViewModel` 模块将所有 ViewModel 声明为 QML 不可创建类型。
 5. `Main.qml` 接收 C++ 持有的 `AppViewModel`，任务页只绑定属性并转发任务 ID。
 
@@ -102,7 +102,7 @@ SmartMate             → persistence + viewmodel + ui 插件
 
 批量管理沿用同一边界：`QML选择事件 → TaskListViewModel的QSet<TaskId> → TaskService批量校验 → 原子Repository端口 → SQLite事务`。批量归档与恢复通过独立状态写入端口一次提交全部条件更新，批量永久删除通过删除端口一次清理全部目标及关联边；任一任务缺失、资格变化、依赖冲突或写入失败都必须整批回滚。选择集、批量模式和全选状态只属于ViewModel会话投影，QML不得收集ID数组或循环调用单项命令。
 
-依赖图读取链路为：`SQLite Repository → TaskService结构化图快照 → TaskGraphViewModel纵向布局与正交路由 → QML Shape渲染`。Model负责最长前置链层级、活动任务及其相连归档节点闭包、上下游闭包、边解析状态和异常图拒绝；ViewModel负责交叉最小化、虚拟路由点、端口、层间通道、像素坐标和详情投影；View只绘制路径、主题与动画，并转发稳定任务ID。布局、筛选、缩放、响应式详情面板和选中状态不持久化。
+依赖图读取链路为：`SQLite Repository → TaskService结构化图快照 → TaskGraphViewModel纵向布局与正交路由 → QML Shape渲染`。Model负责最长前置链层级、活动任务及其相连归档节点闭包、上下游闭包、边解析状态和异常图拒绝；ViewModel负责交叉最小化、虚拟路由点、端口、层间通道、像素坐标和详情投影；View只绘制路径、主题与动画，并转发稳定任务ID。按类别查看时，Model保留匹配类别的核心节点及其直接跨类别前置、后继上下文，拒绝递归扩张或保留外部节点之间的边；ViewModel只负责重新布局并投影类别颜色和上下文标记。布局、筛选、缩放、响应式详情面板和选中状态不持久化。
 
 `view.qml_bootstrap` CTest 使用内存 SQLite 和 Qt 离屏平台执行整条链路，并在根对象创建成功后自动退出。它可以发现数据库驱动、QML 模块、属性注入和运行库加载问题，同时不会写入用户数据。
 

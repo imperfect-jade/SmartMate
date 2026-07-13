@@ -19,7 +19,8 @@ namespace {
                 source.deadline(),
                 source.estimatedMinutes(),
                 source.createdAtUtc(),
-                source.updatedAtUtc()};
+                source.updatedAtUtc(),
+                source.categoryId()};
 }
 
 [[nodiscard]] TaskStatus effectiveStatus(const Task &task) noexcept

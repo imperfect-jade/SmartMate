@@ -1,6 +1,7 @@
 #pragma once
 
 #include "repositories/ITaskBatchTransitionRepository.h"
+#include "repositories/ITaskCategoryRepository.h"
 #include "repositories/ITaskCreationRepository.h"
 #include "repositories/ITaskDeletionRepository.h"
 #include "repositories/ITaskDependencyRepository.h"
@@ -15,7 +16,8 @@ class SqliteTaskRepository final : public ITaskRepository,
                                    public ITaskDependencyRepository,
                                    public ITaskCreationRepository,
                                    public ITaskBatchTransitionRepository,
-                                   public ITaskDeletionRepository {
+                                   public ITaskDeletionRepository,
+                                   public ITaskCategoryRepository {
 public:
     explicit SqliteTaskRepository(QString databasePath);
     ~SqliteTaskRepository() override;
@@ -42,6 +44,15 @@ public:
     /// 在一个事务内永久删除归档任务及其全部入边、出边。
     [[nodiscard]] TaskDeletionWriteResult deleteArchivedTasksWithDependencies(
         const QList<TaskId> &taskIds) override;
+    [[nodiscard]] QList<TaskCategory> findAllCategories() const override;
+    [[nodiscard]] std::optional<TaskCategory> findCategoryById(
+        const TaskCategoryId &id) const override;
+    void insertCategory(const TaskCategory &category) override;
+    [[nodiscard]] bool updateCategory(const TaskCategory &category) override;
+    /// 原子解除全部任务归属并删除类别；任务状态和依赖边保持不变。
+    [[nodiscard]] CategoryDeletionWriteResult deleteCategoryAndUnassignTasks(
+        const TaskCategoryId &id,
+        const QDateTime &updatedAtUtc) override;
 
 private:
     void configureConnection(bool inMemory);

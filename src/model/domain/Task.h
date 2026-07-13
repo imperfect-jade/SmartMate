@@ -1,5 +1,6 @@
 #pragma once
 
+#include "domain/TaskCategory.h"
 #include "domain/TaskTypes.h"
 
 #include <QDateTime>
@@ -19,6 +20,8 @@ struct TaskDraft final {
     std::optional<QDateTime> deadline;
     /// 空值表示未估算，非空值的单位为分钟。
     std::optional<int> estimatedMinutes;
+    /// 空值表示“未分类”；只保存稳定ID，类别名称和颜色不嵌入任务快照。
+    std::optional<TaskCategoryId> categoryId;
 };
 
 /// 不依赖 QObject 的只读领域快照，由 Service 创建、由 Repository 重建。
@@ -34,7 +37,8 @@ public:
          std::optional<QDateTime> deadline,
          std::optional<int> estimatedMinutes,
          QDateTime createdAtUtc,
-         QDateTime updatedAtUtc);
+         QDateTime updatedAtUtc,
+         std::optional<TaskCategoryId> categoryId = std::nullopt);
 
     [[nodiscard]] const TaskId &id() const noexcept;
     [[nodiscard]] const QString &title() const noexcept;
@@ -49,6 +53,8 @@ public:
     [[nodiscard]] const std::optional<TaskStatus> &statusBeforeArchive() const noexcept;
     [[nodiscard]] const std::optional<QDateTime> &deadline() const noexcept;
     [[nodiscard]] const std::optional<int> &estimatedMinutes() const noexcept;
+    /// 空值表示任务当前未归入任何类别。
+    [[nodiscard]] const std::optional<TaskCategoryId> &categoryId() const noexcept;
     /// 创建与更新时间均以 UTC 表示。
     [[nodiscard]] const QDateTime &createdAtUtc() const noexcept;
     [[nodiscard]] const QDateTime &updatedAtUtc() const noexcept;
@@ -64,6 +70,7 @@ private:
     std::optional<TaskStatus> m_statusBeforeArchive;
     std::optional<QDateTime> m_deadline;
     std::optional<int> m_estimatedMinutes;
+    std::optional<TaskCategoryId> m_categoryId;
     QDateTime m_createdAtUtc;
     QDateTime m_updatedAtUtc;
 };

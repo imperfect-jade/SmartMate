@@ -51,6 +51,11 @@ ApplicationWindow {
         }
     }
 
+    function openCategoryManager() {
+        root.appViewModel.taskCategories.reload()
+        categoryDialog.open()
+    }
+
     component NavigationButton: Button {
         id: navButton
         required property int pageIndex
@@ -198,6 +203,7 @@ ApplicationWindow {
                 theme: theme
                 onEditDependenciesRequested: taskId => root.openDependencyEditor(taskId)
                 onShowDependencyGraphRequested: navigationTabs.currentIndex = 1
+                onManageCategoriesRequested: root.openCategoryManager()
             }
 
             DependencyGraphPage {
@@ -222,6 +228,13 @@ ApplicationWindow {
         objectName: "taskDependencyDialog"
         anchors.centerIn: Overlay.overlay
         editor: root.appViewModel.taskDependencies
+        theme: theme
+    }
+
+    TaskCategoryDialog {
+        id: categoryDialog
+        anchors.centerIn: Overlay.overlay
+        categories: root.appViewModel.taskCategories
         theme: theme
     }
 

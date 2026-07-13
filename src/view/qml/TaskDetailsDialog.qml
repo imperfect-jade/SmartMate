@@ -42,6 +42,29 @@ Dialog {
             RowLayout {
                 Label { text: root.taskList.selectedStatusText; color: root.theme.textSecondary; font.bold: true }
                 Label { text: qsTr("%1优先级").arg(root.taskList.selectedPriorityText); color: root.theme.textSecondary }
+                Rectangle {
+                    objectName: "selectedTaskCategoryBadge"
+                    visible: root.taskList.selectedHasCategory
+                    Layout.maximumWidth: root.theme.px(160)
+                    implicitWidth: Math.min(root.theme.px(160),
+                                            selectedCategoryLabel.implicitWidth + 16)
+                    implicitHeight: selectedCategoryLabel.implicitHeight + 7
+                    radius: height / 2
+                    color: Qt.alpha(root.taskList.selectedCategoryAccent, 0.12)
+                    border.color: root.taskList.selectedCategoryAccent
+                    Label {
+                        id: selectedCategoryLabel
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        verticalAlignment: Text.AlignVCenter
+                        text: root.taskList.selectedCategoryName
+                        color: root.taskList.selectedCategoryAccent
+                        font.pixelSize: root.theme.px(11)
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                }
                 Item { Layout.fillWidth: true }
             }
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.borderSoft }

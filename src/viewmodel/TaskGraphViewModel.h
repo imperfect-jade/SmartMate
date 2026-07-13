@@ -6,9 +6,11 @@
 #include <QAbstractListModel>
 #include <QHash>
 #include <QtQmlIntegration/qqmlintegration.h>
+#include <QVariantList>
 
 namespace smartmate::model {
 class TaskService;
+class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -28,6 +30,11 @@ class TaskGraphViewModel final : public QAbstractListModel {
     Q_PROPERTY(QString searchText READ searchText WRITE setSearchText NOTIFY searchTextChanged)
     Q_PROPERTY(int statusFilterIndex READ statusFilterIndex WRITE setStatusFilterIndex
                    NOTIFY statusFilterIndexChanged)
+    Q_PROPERTY(QVariantList categoryFilterOptions READ categoryFilterOptions
+                   NOTIFY categoryOptionsChanged)
+    Q_PROPERTY(int categoryFilterMode READ categoryFilterMode NOTIFY categoryFilterChanged)
+    Q_PROPERTY(QString categoryFilterCategoryId READ categoryFilterCategoryId
+                   NOTIFY categoryFilterChanged)
     Q_PROPERTY(int taskCount READ taskCount NOTIFY graphChanged)
     Q_PROPERTY(int blockedCount READ blockedCount NOTIFY graphChanged)
     Q_PROPERTY(QString currentTaskId READ currentTaskId NOTIFY graphChanged)
@@ -47,6 +54,10 @@ class TaskGraphViewModel final : public QAbstractListModel {
     Q_PROPERTY(qreal selectedNodeCenterY READ selectedNodeCenterY NOTIFY selectionChanged)
     Q_PROPERTY(bool canEditSelectedDependencies READ canEditSelectedDependencies
                    NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedCategoryName READ selectedCategoryName NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedCategoryAccent READ selectedCategoryAccent NOTIFY selectionChanged)
+    Q_PROPERTY(bool selectedHasCategory READ selectedHasCategory NOTIFY selectionChanged)
+    Q_PROPERTY(bool selectedCoreNode READ selectedCoreNode NOTIFY selectionChanged)
     Q_PROPERTY(bool empty READ empty NOTIFY graphChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
     QML_NAMED_ELEMENT(TaskGraphViewModel)
@@ -73,6 +84,10 @@ public:
         SelectedRole,
         EmphasisLevelRole,
         FilterMatchedRole,
+        CategoryNameRole,
+        CategoryAccentRole,
+        HasCategoryRole,
+        CoreNodeRole,
     };
     Q_ENUM(Role)
 
@@ -87,6 +102,9 @@ public:
 
     explicit TaskGraphViewModel(model::TaskService &taskService,
                                 QObject *parent = nullptr);
+    TaskGraphViewModel(model::TaskService &taskService,
+                       model::TaskCategoryService &categoryService,
+                       QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex &index, int role) const override;
@@ -101,6 +119,9 @@ public:
     void setSearchText(const QString &searchText);
     [[nodiscard]] int statusFilterIndex() const noexcept;
     void setStatusFilterIndex(int index);
+    [[nodiscard]] QVariantList categoryFilterOptions() const;
+    [[nodiscard]] int categoryFilterMode() const noexcept;
+    [[nodiscard]] QString categoryFilterCategoryId() const;
     [[nodiscard]] int taskCount() const noexcept;
     [[nodiscard]] int blockedCount() const noexcept;
     [[nodiscard]] QString currentTaskId() const;
@@ -118,6 +139,10 @@ public:
     [[nodiscard]] qreal selectedNodeCenterX() const noexcept;
     [[nodiscard]] qreal selectedNodeCenterY() const noexcept;
     [[nodiscard]] bool canEditSelectedDependencies() const noexcept;
+    [[nodiscard]] QString selectedCategoryName() const;
+    [[nodiscard]] QString selectedCategoryAccent() const;
+    [[nodiscard]] bool selectedHasCategory() const noexcept;
+    [[nodiscard]] bool selectedCoreNode() const noexcept;
     [[nodiscard]] bool empty() const noexcept;
     [[nodiscard]] QString errorMessage() const;
 
@@ -126,6 +151,8 @@ public:
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE bool locateFirstMatch();
     Q_INVOKABLE bool selectCurrentTask();
+    /// 重新请求Model裁剪后的类别子图；QML不得自行删除节点或边。
+    Q_INVOKABLE bool setCategoryFilter(int mode, const QString &categoryId = {});
     Q_INVOKABLE void setHoveredTask(const QString &taskId);
     Q_INVOKABLE void clearHoveredTask();
 
@@ -134,6 +161,8 @@ signals:
     void contentHeightChanged();
     void searchTextChanged();
     void statusFilterIndexChanged();
+    void categoryOptionsChanged();
+    void categoryFilterChanged();
     void selectionChanged();
     void graphChanged();
     void errorMessageChanged();
@@ -153,8 +182,16 @@ private:
     void notifyInteractionRoles();
     void rebuildRelationModels();
     void setErrorMessage(const QString &message);
+    void reloadCategories();
+    [[nodiscard]] const model::TaskCategory *categoryForTask(
+        const model::Task &task) const;
+
+    TaskGraphViewModel(model::TaskService &taskService,
+                       model::TaskCategoryService *categoryService,
+                       QObject *parent);
 
     model::TaskService &m_taskService;
+    model::TaskCategoryService *m_categoryService{nullptr};
     TaskGraphEdgeListModel *m_edges;
     TaskGraphRelationListModel *m_selectedPredecessors;
     TaskGraphRelationListModel *m_selectedSuccessors;
@@ -166,6 +203,9 @@ private:
     model::TaskId m_hoveredTaskId;
     QString m_searchText;
     int m_statusFilterIndex{0};
+    QList<model::TaskCategory> m_categories;
+    int m_categoryFilterMode{0};
+    model::TaskCategoryId m_categoryFilterCategoryId;
     qreal m_contentWidth{0.0};
     qreal m_contentHeight{0.0};
     QString m_errorMessage;

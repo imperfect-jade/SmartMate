@@ -11,6 +11,7 @@ Page {
     required property AppearanceTheme theme
     signal editDependenciesRequested(string taskId)
     signal showDependencyGraphRequested()
+    signal manageCategoriesRequested()
     property bool dragActive: false
 
     function openEditor(taskId) {
@@ -79,6 +80,7 @@ Page {
             taskList: root.appViewModel.taskList
             theme: root.theme
             onNewTaskRequested: root.beginCreate()
+            onManageCategoriesRequested: root.manageCategoriesRequested()
             onBulkArchiveRequested: {
                 bulkArchiveDialog.pendingCount =
                     root.appViewModel.taskList.bulkSelectedCount
@@ -224,6 +226,7 @@ Page {
         anchors.centerIn: Overlay.overlay
         editor: root.appViewModel.taskEditor
         theme: root.theme
+        onManageCategoriesRequested: root.manageCategoriesRequested()
     }
     TaskDetailsDialog {
         id: detailsDialog

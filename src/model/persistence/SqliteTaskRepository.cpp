@@ -17,7 +17,12 @@ namespace {
 // SELECT列顺序必须与taskFromQuery()中的索引映射保持一致。
 constexpr auto kSelectColumns =
     "id, title, description, priority, status, status_before_archive, "
-    "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms";
+    "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms, "
+    "category_id";
+
+// 类别列顺序同样属于持久化协议，必须与categoryFromQuery()同步修改。
+constexpr auto kSelectCategoryColumns =
+    "id, name, color, created_at_utc_ms, updated_at_utc_ms";
 
 [[noreturn]] void throwDatabaseError(const QString &operation, const QSqlError &error)
 {
@@ -138,6 +143,19 @@ std::optional<int> optionalIntegerFromStorage(const QVariant &value)
     return value.toInt();
 }
 
+std::optional<TaskCategoryId> optionalCategoryIdFromStorage(const QVariant &value)
+{
+    if (value.isNull()) {
+        return std::nullopt;
+    }
+
+    const TaskCategoryId id = TaskCategoryId::fromString(value.toString());
+    if (id.isNull()) {
+        throwPersistenceError(QStringLiteral("SQLite contains an invalid category id"));
+    }
+    return id;
+}
+
 Task taskFromQuery(const QSqlQuery &query)
 {
     const auto id = TaskId::fromString(query.value(0).toString());
@@ -155,7 +173,30 @@ Task taskFromQuery(const QSqlQuery &query)
         optionalDateTimeFromStorage(query.value(6)),
         optionalIntegerFromStorage(query.value(7)),
         QDateTime::fromMSecsSinceEpoch(query.value(8).toLongLong(), QTimeZone::UTC),
-        QDateTime::fromMSecsSinceEpoch(query.value(9).toLongLong(), QTimeZone::UTC));
+        QDateTime::fromMSecsSinceEpoch(query.value(9).toLongLong(), QTimeZone::UTC),
+        optionalCategoryIdFromStorage(query.value(10)));
+}
+
+TaskCategory categoryFromQuery(const QSqlQuery &query)
+{
+    const TaskCategoryId id = TaskCategoryId::fromString(query.value(0).toString());
+    if (id.isNull()) {
+        throwPersistenceError(QStringLiteral("SQLite contains an invalid category id"));
+    }
+
+    const auto color = taskCategoryColorFromStorageText(query.value(2).toString());
+    if (!color.has_value()) {
+        throwPersistenceError(
+            QStringLiteral("Unknown task category color in SQLite: %1")
+                .arg(query.value(2).toString()));
+    }
+
+    return TaskCategory{
+        id,
+        query.value(1).toString(),
+        *color,
+        QDateTime::fromMSecsSinceEpoch(query.value(3).toLongLong(), QTimeZone::UTC),
+        QDateTime::fromMSecsSinceEpoch(query.value(4).toLongLong(), QTimeZone::UTC)};
 }
 
 // 外部文本只通过参数绑定写入；可选值映射为SQL NULL，时间统一保存为UTC毫秒。
@@ -201,6 +242,48 @@ void bindTask(QSqlQuery &query, const Task &task)
     query.bindValue(
         QStringLiteral(":updated_at_utc_ms"),
         task.updatedAtUtc().toUTC().toMSecsSinceEpoch());
+
+    if (task.categoryId().has_value()) {
+        query.bindValue(
+            QStringLiteral(":category_id"),
+            task.categoryId()->toString(QUuid::WithoutBraces));
+    } else {
+        query.bindValue(QStringLiteral(":category_id"), QVariant());
+    }
+}
+
+void bindCategory(QSqlQuery &query, const TaskCategory &category)
+{
+    query.bindValue(
+        QStringLiteral(":id"), category.id.toString(QUuid::WithoutBraces));
+    query.bindValue(QStringLiteral(":name"), category.name);
+    // name_key与Model校验共用同一Unicode规范化函数，数据库唯一索引只负责并发兜底。
+    query.bindValue(QStringLiteral(":name_key"), taskCategoryNameKey(category.name));
+    query.bindValue(QStringLiteral(":color"),
+                    taskCategoryColorToStorageText(category.color));
+    query.bindValue(
+        QStringLiteral(":created_at_utc_ms"),
+        category.createdAtUtc.toUTC().toMSecsSinceEpoch());
+    query.bindValue(
+        QStringLiteral(":updated_at_utc_ms"),
+        category.updatedAtUtc.toUTC().toMSecsSinceEpoch());
+}
+
+bool tableHasColumn(QSqlDatabase &database,
+                    const QString &tableName,
+                    const QString &columnName)
+{
+    QSqlQuery query(database);
+    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(tableName))) {
+        throwDatabaseError(QStringLiteral("Cannot inspect SQLite table columns"),
+                           query.lastError());
+    }
+    while (query.next()) {
+        if (query.value(1).toString() == columnName) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -290,9 +373,9 @@ void SqliteTaskRepository::initializeSchema()
     // user_version是迁移入口；旧程序拒绝更高版本，避免误写新Schema。
     const int schemaVersion = versionQuery.value(0).toInt();
     versionQuery.finish();
-    if (schemaVersion > 2) {
+    if (schemaVersion > 3) {
         throwPersistenceError(
-            QStringLiteral("SQLite schema version %1 is newer than supported version 2")
+            QStringLiteral("SQLite schema version %1 is newer than supported version 3")
                 .arg(schemaVersion));
     }
 
@@ -303,6 +386,22 @@ void SqliteTaskRepository::initializeSchema()
     }
 
     try {
+        // 类别实体先于tasks创建，使新数据库可以立即建立category_id外键；旧数据库
+        // 则在同一事务内补列，迁移失败不会留下半个v3 Schema。
+        executeStatement(
+            database,
+            QStringLiteral(
+                "CREATE TABLE IF NOT EXISTS task_categories ("
+                "id TEXT PRIMARY KEY NOT NULL, "
+                "name TEXT NOT NULL, "
+                "name_key TEXT NOT NULL UNIQUE, "
+                "color TEXT NOT NULL CHECK (color IN ("
+                "'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'violet', 'slate')), "
+                "created_at_utc_ms INTEGER NOT NULL, "
+                "updated_at_utc_ms INTEGER NOT NULL, "
+                "CHECK (length(trim(name)) BETWEEN 1 AND 50), "
+                "CHECK (length(name_key) >= 1)"
+                ")"));
         executeStatement(
             database,
             QStringLiteral(
@@ -317,11 +416,22 @@ void SqliteTaskRepository::initializeSchema()
                 "estimated_minutes INTEGER NULL CHECK (estimated_minutes IS NULL OR estimated_minutes BETWEEN 1 AND 525600), "
                 "created_at_utc_ms INTEGER NOT NULL, "
                 "updated_at_utc_ms INTEGER NOT NULL, "
+                "category_id TEXT NULL REFERENCES task_categories(id) ON DELETE SET NULL, "
                 "CHECK (length(trim(title)) BETWEEN 1 AND 200), "
                 "CHECK (length(description) <= 5000), "
                 "CHECK ((status = 'archived' AND status_before_archive IS NOT NULL) OR "
                 "       (status <> 'archived' AND status_before_archive IS NULL))"
                 ")"));
+
+        if (!tableHasColumn(database,
+                            QStringLiteral("tasks"),
+                            QStringLiteral("category_id"))) {
+            executeStatement(
+                database,
+                QStringLiteral(
+                    "ALTER TABLE tasks ADD COLUMN category_id TEXT NULL "
+                    "REFERENCES task_categories(id) ON DELETE SET NULL"));
+        }
         executeStatement(
             database,
             QStringLiteral(
@@ -330,6 +440,10 @@ void SqliteTaskRepository::initializeSchema()
             database,
             QStringLiteral(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_deadline ON tasks(deadline_utc_ms)"));
+        executeStatement(
+            database,
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_category_id ON tasks(category_id)"));
         // Service先给出友好业务错误，此索引再防止并发或绕过Service破坏单进行中约束。
         executeStatement(
             database,
@@ -380,8 +494,8 @@ void SqliteTaskRepository::initializeSchema()
                 "  SELECT RAISE(ABORT, 'task dependency would create a cycle'); "
                 "END"));
 
-        if (schemaVersion < 2) {
-            executeStatement(database, QStringLiteral("PRAGMA user_version = 2"));
+        if (schemaVersion < 3) {
+            executeStatement(database, QStringLiteral("PRAGMA user_version = 3"));
         }
 
         if (!database.commit()) {
@@ -438,10 +552,12 @@ void SqliteTaskRepository::insert(const Task &task)
     query.prepare(QStringLiteral(
         "INSERT INTO tasks ("
         "id, title, description, priority, status, status_before_archive, "
-        "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms"
+        "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms, "
+        "category_id"
         ") VALUES ("
         ":id, :title, :description, :priority, :status, :status_before_archive, "
-        ":deadline_utc_ms, :estimated_minutes, :created_at_utc_ms, :updated_at_utc_ms"
+        ":deadline_utc_ms, :estimated_minutes, :created_at_utc_ms, :updated_at_utc_ms, "
+        ":category_id"
         ")"));
     bindTask(query, task);
     if (!query.exec()) {
@@ -463,7 +579,8 @@ bool SqliteTaskRepository::update(const Task &task)
         "deadline_utc_ms = :deadline_utc_ms, "
         "estimated_minutes = :estimated_minutes, "
         "created_at_utc_ms = :created_at_utc_ms, "
-        "updated_at_utc_ms = :updated_at_utc_ms "
+        "updated_at_utc_ms = :updated_at_utc_ms, "
+        "category_id = :category_id "
         "WHERE id = :id"));
     bindTask(query, task);
     if (!query.exec()) {
@@ -568,10 +685,12 @@ void SqliteTaskRepository::insertTaskWithPredecessors(
         taskQuery.prepare(QStringLiteral(
             "INSERT INTO tasks ("
             "id, title, description, priority, status, status_before_archive, "
-            "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms"
+            "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms, "
+            "category_id"
             ") VALUES ("
             ":id, :title, :description, :priority, :status, :status_before_archive, "
-            ":deadline_utc_ms, :estimated_minutes, :created_at_utc_ms, :updated_at_utc_ms"
+            ":deadline_utc_ms, :estimated_minutes, :created_at_utc_ms, :updated_at_utc_ms, "
+            ":category_id"
             ")"));
         bindTask(taskQuery, task);
         if (!taskQuery.exec()) {
@@ -758,6 +877,153 @@ SqliteTaskRepository::deleteArchivedTasksWithDependencies(
                 database.lastError());
         }
         return {deletedTaskCount, static_cast<int>(removedDependencyCount), {}};
+    } catch (...) {
+        database.rollback();
+        throw;
+    }
+}
+
+QList<TaskCategory> SqliteTaskRepository::findAllCategories() const
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    QSqlQuery query(database);
+    const QString statement =
+        QStringLiteral(
+            "SELECT %1 FROM task_categories ORDER BY name_key ASC, id ASC")
+            .arg(QLatin1StringView(kSelectCategoryColumns));
+    if (!query.exec(statement)) {
+        throwDatabaseError(QStringLiteral("Cannot list task categories"),
+                           query.lastError());
+    }
+
+    QList<TaskCategory> categories;
+    while (query.next()) {
+        categories.append(categoryFromQuery(query));
+    }
+    return categories;
+}
+
+std::optional<TaskCategory> SqliteTaskRepository::findCategoryById(
+    const TaskCategoryId &id) const
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    QSqlQuery query(database);
+    query.prepare(
+        QStringLiteral("SELECT %1 FROM task_categories WHERE id = :id")
+            .arg(QLatin1StringView(kSelectCategoryColumns)));
+    query.bindValue(QStringLiteral(":id"), id.toString(QUuid::WithoutBraces));
+    if (!query.exec()) {
+        throwDatabaseError(QStringLiteral("Cannot find task category"),
+                           query.lastError());
+    }
+    if (!query.next()) {
+        return std::nullopt;
+    }
+    return categoryFromQuery(query);
+}
+
+void SqliteTaskRepository::insertCategory(const TaskCategory &category)
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "INSERT INTO task_categories ("
+        "id, name, name_key, color, created_at_utc_ms, updated_at_utc_ms"
+        ") VALUES ("
+        ":id, :name, :name_key, :color, :created_at_utc_ms, :updated_at_utc_ms"
+        ")"));
+    bindCategory(query, category);
+    if (!query.exec()) {
+        throwDatabaseError(QStringLiteral("Cannot insert task category"),
+                           query.lastError());
+    }
+}
+
+bool SqliteTaskRepository::updateCategory(const TaskCategory &category)
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+        "UPDATE task_categories SET "
+        "name = :name, "
+        "name_key = :name_key, "
+        "color = :color, "
+        "created_at_utc_ms = :created_at_utc_ms, "
+        "updated_at_utc_ms = :updated_at_utc_ms "
+        "WHERE id = :id"));
+    bindCategory(query, category);
+    if (!query.exec()) {
+        throwDatabaseError(QStringLiteral("Cannot update task category"),
+                           query.lastError());
+    }
+    return query.numRowsAffected() > 0;
+}
+
+CategoryDeletionWriteResult
+SqliteTaskRepository::deleteCategoryAndUnassignTasks(
+    const TaskCategoryId &id,
+    const QDateTime &updatedAtUtc)
+{
+    auto database = QSqlDatabase::database(m_connectionName, false);
+    if (!database.transaction()) {
+        throwDatabaseError(
+            QStringLiteral("Cannot start task category deletion transaction"),
+            database.lastError());
+    }
+
+    try {
+        // 类别删除是唯一允许跨任务状态解除归属的管理操作。先解除外键再删除类别，
+        // 并统一更新时间；依赖表不在事务语句中，因此关系必然保持原样。
+        QSqlQuery unassignQuery(database);
+        unassignQuery.prepare(QStringLiteral(
+            "UPDATE tasks SET "
+            "category_id = NULL, updated_at_utc_ms = :updated_at_utc_ms "
+            "WHERE category_id = :category_id"));
+        unassignQuery.bindValue(
+            QStringLiteral(":updated_at_utc_ms"),
+            updatedAtUtc.toUTC().toMSecsSinceEpoch());
+        unassignQuery.bindValue(
+            QStringLiteral(":category_id"), id.toString(QUuid::WithoutBraces));
+        if (!unassignQuery.exec()) {
+            throwDatabaseError(QStringLiteral("Cannot unassign task category"),
+                               unassignQuery.lastError());
+        }
+        const qint64 unassignedTaskCount = unassignQuery.numRowsAffected();
+        if (unassignedTaskCount < 0
+            || unassignedTaskCount > std::numeric_limits<int>::max()) {
+            throwPersistenceError(
+                QStringLiteral("SQLite returned an invalid unassigned task count"));
+        }
+        unassignQuery.finish();
+
+        QSqlQuery deleteQuery(database);
+        deleteQuery.prepare(
+            QStringLiteral("DELETE FROM task_categories WHERE id = :id"));
+        deleteQuery.bindValue(QStringLiteral(":id"),
+                              id.toString(QUuid::WithoutBraces));
+        if (!deleteQuery.exec()) {
+            throwDatabaseError(QStringLiteral("Cannot delete task category"),
+                               deleteQuery.lastError());
+        }
+        const bool categoryDeleted = deleteQuery.numRowsAffected() == 1;
+        deleteQuery.finish();
+
+        // 类别缺失时正常情况下不会命中任何任务；仍回滚而非提交，明确保证零写入。
+        if (!categoryDeleted) {
+            if (!database.rollback()) {
+                throwDatabaseError(
+                    QStringLiteral("Cannot roll back missing task category deletion"),
+                    database.lastError());
+            }
+            return {};
+        }
+
+        if (!database.commit()) {
+            throwDatabaseError(
+                QStringLiteral("Cannot commit task category deletion transaction"),
+                database.lastError());
+        }
+        return {true, static_cast<int>(unassignedTaskCount)};
     } catch (...) {
         database.rollback();
         throw;

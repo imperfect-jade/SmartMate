@@ -1,6 +1,7 @@
 #include "persistence/SqliteTaskRepository.h"
 
 #include "domain/TaskDependency.h"
+#include "domain/TaskCategory.h"
 
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -13,7 +14,10 @@
 
 using smartmate::model::RepositoryException;
 using smartmate::model::Task;
+using smartmate::model::TaskCategory;
+using smartmate::model::TaskCategoryColor;
 using smartmate::model::TaskDependency;
+using smartmate::model::TaskId;
 using smartmate::model::TaskPriority;
 using smartmate::model::TaskStateChange;
 using smartmate::model::TaskStatus;
@@ -34,7 +38,8 @@ Task makeTask(
     std::optional<TaskStatus> statusBeforeArchive = std::nullopt,
     std::optional<QDateTime> deadline = std::nullopt,
     std::optional<int> estimatedMinutes = std::nullopt,
-    QDateTime updatedAt = kUpdatedAt)
+    QDateTime updatedAt = kUpdatedAt,
+    std::optional<QUuid> categoryId = std::nullopt)
 {
     return Task(
         id,
@@ -46,7 +51,8 @@ Task makeTask(
         deadline,
         estimatedMinutes,
         kCreatedAt,
-        updatedAt);
+        updatedAt,
+        categoryId);
 }
 
 void compareTasks(const Task &actual, const Task &expected)
@@ -59,8 +65,18 @@ void compareTasks(const Task &actual, const Task &expected)
     QVERIFY(actual.statusBeforeArchive() == expected.statusBeforeArchive());
     QVERIFY(actual.deadline() == expected.deadline());
     QVERIFY(actual.estimatedMinutes() == expected.estimatedMinutes());
+    QVERIFY(actual.categoryId() == expected.categoryId());
     QCOMPARE(actual.createdAtUtc(), expected.createdAtUtc());
     QCOMPARE(actual.updatedAtUtc(), expected.updatedAtUtc());
+}
+
+void compareCategories(const TaskCategory &actual, const TaskCategory &expected)
+{
+    QCOMPARE(actual.id, expected.id);
+    QCOMPARE(actual.name, expected.name);
+    QCOMPARE(actual.color, expected.color);
+    QCOMPARE(actual.createdAtUtc, expected.createdAtUtc);
+    QCOMPARE(actual.updatedAtUtc, expected.updatedAtUtc);
 }
 
 [[nodiscard]] QString uniqueConnectionName(const QString &prefix)
@@ -123,6 +139,74 @@ void createVersionOneDatabase(const QString &databasePath, const Task &task)
     QSqlDatabase::removeDatabase(connectionName);
 }
 
+void createVersionTwoDatabase(const QString &databasePath,
+                              const Task &predecessor,
+                              const Task &successor)
+{
+    const QString connectionName = uniqueConnectionName(QStringLiteral("create_v2"));
+    {
+        auto database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        database.setDatabaseName(databasePath);
+        QVERIFY2(database.open(), qPrintable(database.lastError().text()));
+        QSqlQuery query(database);
+        QVERIFY2(query.exec(QStringLiteral(
+                     "CREATE TABLE tasks ("
+                     "id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, "
+                     "description TEXT NOT NULL, priority TEXT NOT NULL, "
+                     "status TEXT NOT NULL, status_before_archive TEXT NULL, "
+                     "deadline_utc_ms INTEGER NULL, estimated_minutes INTEGER NULL, "
+                     "created_at_utc_ms INTEGER NOT NULL, updated_at_utc_ms INTEGER NOT NULL)")),
+                 qPrintable(query.lastError().text()));
+        QVERIFY2(query.exec(QStringLiteral(
+                     "CREATE TABLE task_dependencies ("
+                     "predecessor_id TEXT NOT NULL, successor_id TEXT NOT NULL, "
+                     "PRIMARY KEY (predecessor_id, successor_id), "
+                     "CHECK (predecessor_id <> successor_id), "
+                     "FOREIGN KEY (predecessor_id) REFERENCES tasks(id) ON DELETE RESTRICT, "
+                     "FOREIGN KEY (successor_id) REFERENCES tasks(id) ON DELETE RESTRICT)")),
+                 qPrintable(query.lastError().text()));
+
+        QSqlQuery insertTask(database);
+        insertTask.prepare(QStringLiteral(
+            "INSERT INTO tasks ("
+            "id, title, description, priority, status, status_before_archive, "
+            "deadline_utc_ms, estimated_minutes, created_at_utc_ms, updated_at_utc_ms"
+            ") VALUES ("
+            ":id, :title, :description, :priority, :status, NULL, "
+            "NULL, NULL, :created, :updated)"));
+        for (const Task *task : {&predecessor, &successor}) {
+            insertTask.bindValue(QStringLiteral(":id"),
+                                 task->id().toString(QUuid::WithoutBraces));
+            insertTask.bindValue(QStringLiteral(":title"), task->title());
+            insertTask.bindValue(QStringLiteral(":description"), task->description());
+            insertTask.bindValue(QStringLiteral(":priority"), QStringLiteral("normal"));
+            insertTask.bindValue(QStringLiteral(":status"),
+                                 task == &predecessor ? QStringLiteral("done")
+                                                      : QStringLiteral("todo"));
+            insertTask.bindValue(QStringLiteral(":created"),
+                                 task->createdAtUtc().toMSecsSinceEpoch());
+            insertTask.bindValue(QStringLiteral(":updated"),
+                                 task->updatedAtUtc().toMSecsSinceEpoch());
+            QVERIFY2(insertTask.exec(), qPrintable(insertTask.lastError().text()));
+            insertTask.finish();
+        }
+
+        QSqlQuery edgeQuery(database);
+        edgeQuery.prepare(QStringLiteral(
+            "INSERT INTO task_dependencies (predecessor_id, successor_id) "
+            "VALUES (:predecessor, :successor)"));
+        edgeQuery.bindValue(QStringLiteral(":predecessor"),
+                            predecessor.id().toString(QUuid::WithoutBraces));
+        edgeQuery.bindValue(QStringLiteral(":successor"),
+                            successor.id().toString(QUuid::WithoutBraces));
+        QVERIFY2(edgeQuery.exec(), qPrintable(edgeQuery.lastError().text()));
+        QVERIFY2(query.exec(QStringLiteral("PRAGMA user_version = 2")),
+                 qPrintable(query.lastError().text()));
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
 [[nodiscard]] bool dependencyWriteThrows(
     SqliteTaskRepository &repository,
     const QUuid &successorId,
@@ -170,8 +254,13 @@ class SqliteTaskRepositoryTest final : public QObject {
 private slots:
     void initializesSchemaIdempotently();
     void migratesVersionOneWithoutChangingTaskData();
+    void migratesVersionTwoWithoutChangingTasksOrDependencies();
     void rollsBackFailedVersionOneMigration();
     void rejectsFutureSchemaVersion();
+    void roundTripsTaskCategoryAndUnicodeNameKey();
+    void categoryForeignKeyRejectsMissingCategory();
+    void deletesCategoryAndUnassignsTasksWithoutChangingDependencies();
+    void categoryDeletionRollsBackAtomically();
     void roundTripsCompleteUnicodeTask();
     void roundTripsNullOptionals();
     void storesOmittedDescriptionAsEmptyText();
@@ -219,15 +308,24 @@ void SqliteTaskRepositoryTest::initializesSchemaIdempotently()
         QSqlQuery versionQuery(database);
         QVERIFY(versionQuery.exec(QStringLiteral("PRAGMA user_version")));
         QVERIFY(versionQuery.next());
-        QCOMPARE(versionQuery.value(0).toInt(), 2);
+        QCOMPARE(versionQuery.value(0).toInt(), 3);
 
         QSqlQuery indexQuery(database);
         QVERIFY(indexQuery.exec(QStringLiteral(
             "SELECT COUNT(*) FROM sqlite_master "
             "WHERE type = 'index' AND name IN ("
-            "'idx_tasks_status', 'idx_tasks_deadline', 'idx_tasks_single_in_progress')")));
+            "'idx_tasks_status', 'idx_tasks_deadline', 'idx_tasks_single_in_progress', "
+            "'idx_tasks_category_id')")));
         QVERIFY(indexQuery.next());
-        QCOMPARE(indexQuery.value(0).toInt(), 3);
+        QCOMPARE(indexQuery.value(0).toInt(), 4);
+
+        QSqlQuery categorySchemaQuery(database);
+        QVERIFY(categorySchemaQuery.exec(QStringLiteral(
+            "SELECT COUNT(*) FROM sqlite_master WHERE "
+            "(type = 'table' AND name = 'task_categories') OR "
+            "(type = 'index' AND name = 'idx_tasks_category_id')")));
+        QVERIFY(categorySchemaQuery.next());
+        QCOMPARE(categorySchemaQuery.value(0).toInt(), 2);
 
         QSqlQuery dependencySchemaQuery(database);
         QVERIFY(dependencySchemaQuery.exec(QStringLiteral(
@@ -287,7 +385,7 @@ void SqliteTaskRepositoryTest::migratesVersionOneWithoutChangingTaskData()
         QSqlQuery versionQuery(database);
         QVERIFY(versionQuery.exec(QStringLiteral("PRAGMA user_version")));
         QVERIFY(versionQuery.next());
-        QCOMPARE(versionQuery.value(0).toInt(), 2);
+        QCOMPARE(versionQuery.value(0).toInt(), 3);
 
         QSqlQuery foreignKeyQuery(database);
         QVERIFY(foreignKeyQuery.exec(QStringLiteral(
@@ -299,6 +397,53 @@ void SqliteTaskRepositoryTest::migratesVersionOneWithoutChangingTaskData()
             QCOMPARE(foreignKeyQuery.value(6).toString(), QStringLiteral("RESTRICT"));
         }
         QCOMPARE(foreignKeyCount, 2);
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+void SqliteTaskRepositoryTest::migratesVersionTwoWithoutChangingTasksOrDependencies()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    const Task predecessor = makeTask(
+        QUuid::createUuid(), QStringLiteral("v2 前置"), TaskPriority::Normal,
+        TaskStatus::Done);
+    const Task successor = makeTask(
+        QUuid::createUuid(), QStringLiteral("v2 后继"), TaskPriority::Normal,
+        TaskStatus::Todo);
+    createVersionTwoDatabase(databasePath, predecessor, successor);
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        const auto migratedPredecessor = repository.findById(predecessor.id());
+        const auto migratedSuccessor = repository.findById(successor.id());
+        QVERIFY(migratedPredecessor.has_value());
+        QVERIFY(migratedSuccessor.has_value());
+        QVERIFY(!migratedPredecessor->categoryId().has_value());
+        QVERIFY(!migratedSuccessor->categoryId().has_value());
+        QCOMPARE(repository.findAllDependencies(),
+                 QList<TaskDependency>({{predecessor.id(), successor.id()}}));
+        QVERIFY(repository.findAllCategories().isEmpty());
+    }
+
+    const QString connectionName = uniqueConnectionName(QStringLiteral("verify_v3"));
+    {
+        auto database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        database.setDatabaseName(databasePath);
+        QVERIFY(database.open());
+        QSqlQuery query(database);
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version")));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 3);
+        QVERIFY(query.exec(QStringLiteral("PRAGMA table_info(tasks)")));
+        bool categoryColumnFound = false;
+        while (query.next()) {
+            categoryColumnFound = categoryColumnFound
+                || query.value(1).toString() == QStringLiteral("category_id");
+        }
+        QVERIFY(categoryColumnFound);
         database.close();
     }
     QSqlDatabase::removeDatabase(connectionName);
@@ -372,7 +517,7 @@ void SqliteTaskRepositoryTest::rejectsFutureSchemaVersion()
         database.setDatabaseName(databasePath);
         QVERIFY(database.open());
         QSqlQuery query(database);
-        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 3")));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 4")));
         database.close();
     }
     QSqlDatabase::removeDatabase(connectionName);
@@ -384,6 +529,213 @@ void SqliteTaskRepositoryTest::rejectsFutureSchemaVersion()
         exceptionThrown = true;
     }
     QVERIFY(exceptionThrown);
+}
+
+void SqliteTaskRepositoryTest::roundTripsTaskCategoryAndUnicodeNameKey()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    const TaskCategory expected{
+        QUuid::createUuid(),
+        QStringLiteral("Ｗｏｒｋ"),
+        TaskCategoryColor::Violet,
+        kCreatedAt,
+        kUpdatedAt};
+    const Task assignedTask = makeTask(
+        QUuid::createUuid(), QStringLiteral("重启后保留类别"), TaskPriority::Normal,
+        TaskStatus::Todo, std::nullopt, std::nullopt, std::nullopt,
+        kUpdatedAt, expected.id);
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        repository.insertCategory(expected);
+        const auto stored = repository.findCategoryById(expected.id);
+        QVERIFY(stored.has_value());
+        compareCategories(*stored, expected);
+
+        // NFKC与大小写折叠后的唯一键相同，数据库必须拒绝绕过Service的重复写入。
+        bool duplicateRejected = false;
+        try {
+            repository.insertCategory(TaskCategory{
+                QUuid::createUuid(), QStringLiteral("work"),
+                TaskCategoryColor::Blue, kCreatedAt, kUpdatedAt});
+        } catch (const RepositoryException &) {
+            duplicateRejected = true;
+        }
+        QVERIFY(duplicateRejected);
+
+        TaskCategory renamed = expected;
+        renamed.name = QStringLiteral("工作");
+        renamed.color = TaskCategoryColor::Teal;
+        renamed.updatedAtUtc = kUpdatedAt.addSecs(30);
+        QVERIFY(repository.updateCategory(renamed));
+        const auto updated = repository.findCategoryById(expected.id);
+        QVERIFY(updated.has_value());
+        compareCategories(*updated, renamed);
+
+        // 50个兼容连字在NFKC后会扩展到150字符；name合法时name_key不能误设50上限。
+        repository.insertCategory(TaskCategory{
+            QUuid::createUuid(), QString(50, QChar(0xFB03)),
+            TaskCategoryColor::Amber, kCreatedAt, kUpdatedAt});
+        repository.insert(assignedTask);
+        QCOMPARE(repository.findAllCategories().size(), 2);
+    }
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        QCOMPARE(repository.findAllCategories().size(), 2);
+        QVERIFY(repository.findCategoryById(expected.id).has_value());
+        const auto reloadedTask = repository.findById(assignedTask.id());
+        QVERIFY(reloadedTask.has_value());
+        QVERIFY(reloadedTask->categoryId() == std::optional<QUuid>(expected.id));
+        QVERIFY(!repository.updateCategory(TaskCategory{
+            QUuid::createUuid(), QStringLiteral("不存在"),
+            TaskCategoryColor::Slate, kCreatedAt, kUpdatedAt}));
+    }
+}
+
+void SqliteTaskRepositoryTest::categoryForeignKeyRejectsMissingCategory()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    SqliteTaskRepository repository(directory.filePath(QStringLiteral("tasks.db")));
+    const QUuid missingCategoryId = QUuid::createUuid();
+    const Task invalid = makeTask(
+        QUuid::createUuid(), QStringLiteral("悬空类别任务"), TaskPriority::Normal,
+        TaskStatus::Todo, std::nullopt, std::nullopt, std::nullopt,
+        kUpdatedAt, missingCategoryId);
+
+    bool insertRejected = false;
+    try {
+        repository.insert(invalid);
+    } catch (const RepositoryException &) {
+        insertRejected = true;
+    }
+    QVERIFY(insertRejected);
+    QVERIFY(!repository.findById(invalid.id()).has_value());
+
+    const TaskCategory category{
+        QUuid::createUuid(), QStringLiteral("学习"), TaskCategoryColor::Green,
+        kCreatedAt, kUpdatedAt};
+    repository.insertCategory(category);
+    const Task valid = makeTask(
+        invalid.id(), invalid.title(), TaskPriority::Normal, TaskStatus::Todo,
+        std::nullopt, std::nullopt, std::nullopt, kUpdatedAt, category.id);
+    repository.insert(valid);
+    const auto stored = repository.findById(valid.id());
+    QVERIFY(stored.has_value());
+    QVERIFY(stored->categoryId() == std::optional<QUuid>(category.id));
+}
+
+void SqliteTaskRepositoryTest::deletesCategoryAndUnassignsTasksWithoutChangingDependencies()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    const TaskCategory category{
+        QUuid::createUuid(), QStringLiteral("项目"), TaskCategoryColor::Orange,
+        kCreatedAt, kUpdatedAt};
+    const QDateTime deletionTime = kUpdatedAt.addSecs(90);
+    const Task predecessor = makeTask(
+        QUuid::createUuid(), QStringLiteral("前置"), TaskPriority::Normal,
+        TaskStatus::Done, std::nullopt, std::nullopt, std::nullopt,
+        kUpdatedAt, category.id);
+    const Task successor = makeTask(
+        QUuid::createUuid(), QStringLiteral("后继"), TaskPriority::Normal,
+        TaskStatus::Todo, std::nullopt, std::nullopt, std::nullopt,
+        kUpdatedAt, category.id);
+    const Task archived = makeTask(
+        QUuid::createUuid(), QStringLiteral("归档"), TaskPriority::Normal,
+        TaskStatus::Archived, TaskStatus::Cancelled, std::nullopt, std::nullopt,
+        kUpdatedAt, category.id);
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        repository.insertCategory(category);
+        repository.insert(predecessor);
+        repository.insert(successor);
+        repository.insert(archived);
+        repository.replacePredecessors(successor.id(), {predecessor.id()});
+        const QList<TaskDependency> dependenciesBefore =
+            repository.findAllDependencies();
+
+        const auto outcome = repository.deleteCategoryAndUnassignTasks(
+            category.id, deletionTime);
+        QVERIFY(outcome.categoryDeleted);
+        QCOMPARE(outcome.unassignedTaskCount, 3);
+        QVERIFY(!repository.findCategoryById(category.id).has_value());
+        QCOMPARE(repository.findAllDependencies(), dependenciesBefore);
+
+        for (const TaskId &id : {predecessor.id(), successor.id(), archived.id()}) {
+            const auto task = repository.findById(id);
+            QVERIFY(task.has_value());
+            QVERIFY(!task->categoryId().has_value());
+            QCOMPARE(task->updatedAtUtc(), deletionTime);
+        }
+        QCOMPARE(repository.findById(predecessor.id())->status(), TaskStatus::Done);
+        QCOMPARE(repository.findById(successor.id())->status(), TaskStatus::Todo);
+        QCOMPARE(repository.findById(archived.id())->status(), TaskStatus::Archived);
+
+        const auto missingOutcome = repository.deleteCategoryAndUnassignTasks(
+            QUuid::createUuid(), deletionTime.addSecs(1));
+        QVERIFY(!missingOutcome.categoryDeleted);
+        QCOMPARE(missingOutcome.unassignedTaskCount, 0);
+    }
+
+    {
+        SqliteTaskRepository repository(databasePath);
+        QVERIFY(!repository.findCategoryById(category.id).has_value());
+        QCOMPARE(repository.findAllDependencies(),
+                 QList<TaskDependency>({{predecessor.id(), successor.id()}}));
+        QVERIFY(!repository.findById(successor.id())->categoryId().has_value());
+    }
+}
+
+void SqliteTaskRepositoryTest::categoryDeletionRollsBackAtomically()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("tasks.db"));
+    SqliteTaskRepository repository(databasePath);
+    const TaskCategory category{
+        QUuid::createUuid(), QStringLiteral("不可删除"), TaskCategoryColor::Rose,
+        kCreatedAt, kUpdatedAt};
+    const Task task = makeTask(
+        QUuid::createUuid(), QStringLiteral("必须回滚归属"), TaskPriority::Normal,
+        TaskStatus::Todo, std::nullopt, std::nullopt, std::nullopt,
+        kUpdatedAt, category.id);
+    repository.insertCategory(category);
+    repository.insert(task);
+
+    const QString connectionName = uniqueConnectionName(QStringLiteral("category_sabotage"));
+    {
+        auto database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        database.setDatabaseName(databasePath);
+        QVERIFY(database.open());
+        QSqlQuery query(database);
+        QVERIFY2(query.exec(QStringLiteral(
+                     "CREATE TRIGGER reject_category_delete "
+                     "BEFORE DELETE ON task_categories BEGIN "
+                     "SELECT RAISE(ABORT, 'test category delete failure'); END")),
+                 qPrintable(query.lastError().text()));
+        database.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    bool deletionRejected = false;
+    try {
+        (void) repository.deleteCategoryAndUnassignTasks(
+            category.id, kUpdatedAt.addSecs(300));
+    } catch (const RepositoryException &) {
+        deletionRejected = true;
+    }
+    QVERIFY(deletionRejected);
+    QVERIFY(repository.findCategoryById(category.id).has_value());
+    const auto storedTask = repository.findById(task.id());
+    QVERIFY(storedTask.has_value());
+    QVERIFY(storedTask->categoryId() == std::optional<QUuid>(category.id));
+    QCOMPARE(storedTask->updatedAtUtc(), task.updatedAtUtc());
 }
 
 void SqliteTaskRepositoryTest::roundTripsCompleteUnicodeTask()

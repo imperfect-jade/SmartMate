@@ -16,6 +16,31 @@ target_link_libraries(tst_task_service
 
 add_test(NAME model.task_service COMMAND tst_task_service)
 
+qt_add_executable(tst_task_category_service
+    model/tst_TaskCategoryService.cpp
+    fakes/FakeTaskCategoryRepository.h
+)
+target_include_directories(tst_task_category_service
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(tst_task_category_service
+    PRIVATE smartmate_model Qt6::Test
+)
+add_test(NAME model.task_category_service COMMAND tst_task_category_service)
+
+qt_add_executable(tst_task_category_task_service
+    model/tst_TaskCategoryTaskService.cpp
+    fakes/FakeTaskCategoryRepository.h
+)
+target_include_directories(tst_task_category_task_service
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(tst_task_category_task_service
+    PRIVATE smartmate_model Qt6::Test
+)
+add_test(NAME model.task_category_task_service
+         COMMAND tst_task_category_task_service)
+
 qt_add_executable(tst_task_state_machine
     model/tst_TaskStateMachine.cpp
 )
@@ -234,6 +259,8 @@ set(runtime_path_modifications
 
 set_tests_properties(
     model.task_service
+    model.task_category_service
+    model.task_category_task_service
     model.task_state_machine
     model.task_dependency_cancellation
     model.task_state_transitions

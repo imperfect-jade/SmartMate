@@ -3,14 +3,17 @@
 #include "TaskEditorViewModel.h"
 #include "TaskGraphViewModel.h"
 #include "TaskListViewModel.h"
+#include "TaskCategoryViewModel.h"
 #include "fakes/FakeTaskDependencyRepository.h"
 #include "fakes/FakeTaskCreationRepository.h"
 #include "fakes/FakeTaskBatchTransitionRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
 #include "fakes/FakeTaskRepository.h"
+#include "fakes/FakeTaskCategoryRepository.h"
 
 #include "domain/Task.h"
 #include "services/TaskService.h"
+#include "services/TaskCategoryService.h"
 
 #include <QDateTime>
 #include <QRectF>
@@ -28,22 +31,28 @@ using smartmate::model::Task;
 using smartmate::model::TaskDependency;
 using smartmate::model::TaskPriority;
 using smartmate::model::TaskService;
+using smartmate::model::TaskCategory;
+using smartmate::model::TaskCategoryColor;
+using smartmate::model::TaskCategoryService;
 using smartmate::model::TaskStatus;
 using smartmate::tests::FakeTaskRepository;
 using smartmate::tests::FakeTaskCreationRepository;
 using smartmate::tests::FakeTaskBatchTransitionRepository;
 using smartmate::tests::FakeTaskDeletionRepository;
 using smartmate::tests::FakeTaskDependencyRepository;
+using smartmate::tests::FakeTaskCategoryRepository;
 using smartmate::viewmodel::AppViewModel;
 using smartmate::viewmodel::TaskDependencyViewModel;
 using smartmate::viewmodel::TaskEditorViewModel;
 using smartmate::viewmodel::TaskGraphViewModel;
 using smartmate::viewmodel::TaskListViewModel;
+using smartmate::viewmodel::TaskCategoryViewModel;
 
 namespace {
 
 // 各ViewModel测试只借用删除端口；端口生命周期覆盖全部局部Service。
 FakeTaskDeletionRepository deletionRepository;
+FakeTaskCategoryRepository categoryRepository;
 
 /// 为既有ViewModel测试按其局部任务仓库重建原子状态端口，避免各用例重复样板。
 [[nodiscard]] FakeTaskBatchTransitionRepository &batchTransitionsFor(
@@ -65,7 +74,9 @@ FakeTaskDeletionRepository deletionRepository;
                         const qint64 updatedMilliseconds,
                         const TaskPriority priority = TaskPriority::Normal,
                         QString description = QStringLiteral("description"),
-                        std::optional<QDateTime> deadline = std::nullopt)
+                        std::optional<QDateTime> deadline = std::nullopt,
+                        std::optional<smartmate::model::TaskCategoryId> categoryId =
+                            std::nullopt)
 {
     return Task{QUuid::fromString(id),
                 std::move(title),
@@ -78,7 +89,16 @@ FakeTaskDeletionRepository deletionRepository;
                 std::move(deadline),
                 30,
                 utcTime(1700000000000),
-                utcTime(updatedMilliseconds)};
+                utcTime(updatedMilliseconds),
+                categoryId};
+}
+
+[[nodiscard]] TaskCategory category(const QString &id,
+                                    QString name,
+                                    const TaskCategoryColor color)
+{
+    return {QUuid::fromString(id), std::move(name), color,
+            utcTime(1700000000000), utcTime(1700000000000)};
 }
 
 [[nodiscard]] QString idAt(const TaskListViewModel &viewModel, const int row)
@@ -191,6 +211,14 @@ private slots:
     void graphMinimizesSimpleLayerCrossing();
     void graphRoutesLongEdgesDeterministically();
     void graphReloadPreservesVisibleSelectionAndClearsHiddenSelection();
+    // 类别目录、任务筛选和分类子图只投影Service结果，不在QML复制业务规则。
+    void categoryViewModelProjectsCrudAndUsageCounts();
+    void categoryDeletionKeepsOpenEditorDraftClean();
+    void categoryViewModelRetainsUsageCountsWhenTaskReadFails();
+    void editorPersistsStableCategorySelection();
+    void listCombinesCategoryWithExistingFilters();
+    void graphProjectsCoreAndCrossCategoryContext();
+    void graphCategoryFilterFailureRetainsPreviousStateAndSnapshot();
 };
 
 void TaskViewModelsTest::appViewModelOwnsBindableChildren()
@@ -199,7 +227,8 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     AppViewModel app{service};
 
     QCOMPARE(app.applicationName(), QStringLiteral("SmartMate"));
@@ -207,6 +236,7 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
     QVERIFY(app.taskEditor() != nullptr);
     QVERIFY(app.taskDependencies() != nullptr);
     QVERIFY(app.taskGraph() != nullptr);
+    QVERIFY(app.taskCategories() != nullptr);
     QVERIFY(app.appearanceSettings() != nullptr);
 }
 
@@ -214,6 +244,7 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
 #include "tst_TaskDependencyViewModel.inc"
 #include "tst_TaskEditorViewModel.inc"
 #include "tst_TaskGraphViewModel.inc"
+#include "tst_TaskCategoryViewModels.inc"
 
 QTEST_GUILESS_MAIN(TaskViewModelsTest)
 

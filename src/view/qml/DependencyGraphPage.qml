@@ -138,6 +138,23 @@ Page {
                         currentIndex: root.graph.statusFilterIndex
                         onActivated: index => root.graph.statusFilterIndex = index
                     }
+                    ComboBox {
+                        id: graphCategoryFilter
+                        objectName: "graphCategoryFilter"
+                        Layout.preferredWidth: root.theme.px(158)
+                        model: root.graph.categoryFilterOptions
+                        textRole: "name"
+                        valueRole: "categoryId"
+                        currentIndex: root.graph.categoryFilterMode === 0 ? 0
+                                      : root.graph.categoryFilterMode === 1 ? 1
+                                      : graphCategoryFilter.indexOfValue(
+                                            root.graph.categoryFilterCategoryId)
+                        onActivated: index => {
+                            const option = root.graph.categoryFilterOptions[index]
+                            root.graph.setCategoryFilter(option.mode,
+                                                         option.categoryId)
+                        }
+                    }
                 }
 
                 RowLayout {
@@ -264,7 +281,9 @@ Page {
                     objectName: "dependencyGraphEmptyState"
                     anchors.centerIn: parent
                     visible: root.graph.empty && root.graph.errorMessage.length === 0
-                    text: qsTr("还没有可显示的活动任务")
+                    text: root.graph.categoryFilterMode === 0
+                          ? qsTr("还没有可显示的活动任务")
+                          : qsTr("当前类别没有可显示的任务")
                     color: root.theme.textMuted
                     font.pixelSize: root.theme.px(16)
                 }
@@ -310,6 +329,42 @@ Page {
                             width: detailsScroll.availableWidth
                             spacing: root.theme.px(10)
                             Label { objectName: "selectedGraphTaskTitle"; Layout.fillWidth: true; Layout.minimumWidth: 0; text: root.graph.selectedTaskTitle; color: root.theme.textPrimary; font.pixelSize: root.theme.px(17); font.bold: true; wrapMode: Text.Wrap }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: root.graph.selectedHasCategory
+                                         || !root.graph.selectedCoreNode
+                                Rectangle {
+                                    visible: root.graph.selectedHasCategory
+                                    Layout.maximumWidth: root.theme.px(150)
+                                    implicitWidth: Math.min(
+                                        root.theme.px(150),
+                                        selectedGraphCategoryLabel.implicitWidth + 16)
+                                    implicitHeight: selectedGraphCategoryLabel.implicitHeight + 7
+                                    radius: height / 2
+                                    color: Qt.alpha(root.graph.selectedCategoryAccent, 0.12)
+                                    border.color: root.graph.selectedCategoryAccent
+                                    Label {
+                                        id: selectedGraphCategoryLabel
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: root.graph.selectedCategoryName
+                                        color: root.graph.selectedCategoryAccent
+                                        font.pixelSize: root.theme.px(11)
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                Label {
+                                    visible: !root.graph.selectedCoreNode
+                                    text: qsTr("跨类别上下文")
+                                    color: root.theme.textMuted
+                                    font.pixelSize: root.theme.px(11)
+                                    font.bold: true
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
                             Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: qsTr("%1 · %2优先级").arg(root.graph.selectedStatusText).arg(root.graph.selectedPriorityText); color: root.theme.textSecondary; wrapMode: Text.Wrap }
                             Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: root.graph.selectedDescription.length > 0 ? root.graph.selectedDescription : qsTr("暂无描述"); color: root.graph.selectedDescription.length > 0 ? root.theme.textBody : root.theme.textMuted; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight }
                             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.theme.borderSoft }
@@ -385,6 +440,9 @@ Page {
                 root.detailsExpanded = true
             else if (!root.detailsPinned)
                 root.detailsExpanded = false
+        }
+        function onCategoryFilterChanged() {
+            Qt.callLater(root.fitContent)
         }
     }
 

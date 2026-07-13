@@ -3,6 +3,7 @@
 #include "TaskDependencyViewModel.h"
 #include "AppearanceSettingsViewModel.h"
 #include "TaskEditorViewModel.h"
+#include "TaskCategoryViewModel.h"
 #include "TaskGraphViewModel.h"
 #include "TaskListViewModel.h"
 
@@ -13,6 +14,7 @@
 namespace smartmate::model {
 class TaskService;
 class AppearanceSettingsService;
+class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -27,6 +29,8 @@ class AppViewModel : public QObject {
     Q_PROPERTY(smartmate::viewmodel::TaskDependencyViewModel *taskDependencies
                    READ taskDependencies CONSTANT)
     Q_PROPERTY(smartmate::viewmodel::TaskGraphViewModel *taskGraph READ taskGraph CONSTANT)
+    Q_PROPERTY(smartmate::viewmodel::TaskCategoryViewModel *taskCategories
+                   READ taskCategories CONSTANT)
     Q_PROPERTY(smartmate::viewmodel::AppearanceSettingsViewModel *appearanceSettings
                    READ appearanceSettings CONSTANT)
     QML_NAMED_ELEMENT(AppViewModel)
@@ -37,17 +41,26 @@ public:
     AppViewModel(model::TaskService &taskService,
                  model::AppearanceSettingsService &appearanceService,
                  QObject *parent = nullptr);
+    AppViewModel(model::TaskService &taskService,
+                 model::TaskCategoryService &categoryService,
+                 QObject *parent = nullptr);
+    AppViewModel(model::TaskService &taskService,
+                 model::TaskCategoryService &categoryService,
+                 model::AppearanceSettingsService &appearanceService,
+                 QObject *parent = nullptr);
 
     [[nodiscard]] QString applicationName() const;
     [[nodiscard]] TaskListViewModel *taskList() noexcept;
     [[nodiscard]] TaskEditorViewModel *taskEditor() noexcept;
     [[nodiscard]] TaskDependencyViewModel *taskDependencies() noexcept;
     [[nodiscard]] TaskGraphViewModel *taskGraph() noexcept;
+    [[nodiscard]] TaskCategoryViewModel *taskCategories() noexcept;
     [[nodiscard]] AppearanceSettingsViewModel *appearanceSettings() noexcept;
 
 private:
-    // 四个子 ViewModel 共享同一个 TaskService，通过 Service 的状态变化保持同步，
-    // 但彼此不直接调用，从而避免 ViewModel 之间形成隐式耦合。
+    // 子ViewModel共享任务与类别Service的状态通知，但彼此不直接调用，
+    // 从而让列表、编辑器、类别管理和依赖图保持同步而不形成隐式耦合。
+    TaskCategoryViewModel m_taskCategories;
     TaskListViewModel m_taskList;
     TaskEditorViewModel m_taskEditor;
     /// 采用 QObject 子对象所有权，使 QML 只能观察且无需 app 层单独登记生命周期。

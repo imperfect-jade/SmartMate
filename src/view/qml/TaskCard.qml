@@ -16,6 +16,9 @@ Rectangle {
     required property string statusText
     required property int priority
     required property string priorityText
+    required property string categoryName
+    required property string categoryAccent
+    required property bool hasCategory
     required property string deadlineText
     required property string orderReasonText
     required property bool blocked
@@ -182,6 +185,29 @@ Rectangle {
                     font.pixelSize: card.theme.px(17)
                     font.bold: true
                     elide: Text.ElideRight
+                }
+                Rectangle {
+                    objectName: "taskCategoryBadge_" + card.taskId
+                    visible: card.hasCategory
+                    Layout.maximumWidth: card.theme.px(120)
+                    implicitWidth: Math.min(card.theme.px(120),
+                                            categoryLabel.implicitWidth + 16)
+                    implicitHeight: categoryLabel.implicitHeight + 8
+                    radius: height / 2
+                    color: Qt.alpha(card.categoryAccent, 0.12)
+                    border.color: card.categoryAccent
+                    Label {
+                        id: categoryLabel
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        verticalAlignment: Text.AlignVCenter
+                        text: card.categoryName
+                        color: card.categoryAccent
+                        font.pixelSize: card.theme.px(12)
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
                 }
                 Label {
                     text: card.statusText

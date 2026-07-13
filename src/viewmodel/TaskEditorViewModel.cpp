@@ -2,8 +2,10 @@
 
 #include "TaskErrorMapper.h"
 #include "TaskPresentationFormatter.h"
+#include "TaskCategoryPresentation.h"
 #include "domain/TaskConstraints.h"
 #include "domain/TaskCreationRequest.h"
+#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
@@ -21,7 +23,8 @@ namespace {
                                          const QString &description,
                                          const int priorityIndex,
                                          std::optional<QDateTime> deadline,
-                                         std::optional<int> estimatedMinutes)
+                                         std::optional<int> estimatedMinutes,
+                                         std::optional<model::TaskCategoryId> categoryId)
 {
     model::TaskDraft draft;
     draft.title = title;
@@ -29,22 +32,56 @@ namespace {
     draft.priority = static_cast<model::TaskPriority>(priorityIndex);
     draft.deadline = std::move(deadline);
     draft.estimatedMinutes = estimatedMinutes;
+    draft.categoryId = categoryId;
     return draft;
 }
 }
 
 TaskEditorViewModel::TaskEditorViewModel(model::TaskService &taskService, QObject *parent)
-    : TaskEditorViewModel(taskService, QTimeZone::systemTimeZone(), parent)
+    : TaskEditorViewModel(taskService, nullptr, QTimeZone::systemTimeZone(), parent)
+{
+}
+
+TaskEditorViewModel::TaskEditorViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService &categoryService,
+    QObject *parent)
+    : TaskEditorViewModel(taskService, &categoryService,
+                          QTimeZone::systemTimeZone(), parent)
 {
 }
 
 TaskEditorViewModel::TaskEditorViewModel(model::TaskService &taskService,
                                          QTimeZone timeZone,
                                          QObject *parent)
+    : TaskEditorViewModel(taskService, nullptr, std::move(timeZone), parent)
+{
+}
+
+TaskEditorViewModel::TaskEditorViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService &categoryService,
+    QTimeZone timeZone,
+    QObject *parent)
+    : TaskEditorViewModel(taskService, &categoryService, std::move(timeZone), parent)
+{
+}
+
+TaskEditorViewModel::TaskEditorViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService *categoryService,
+    QTimeZone timeZone,
+    QObject *parent)
     : QAbstractListModel(parent)
     , m_taskService(taskService)
+    , m_categoryService(categoryService)
     , m_timeZone(std::move(timeZone))
 {
+    if (m_categoryService) {
+        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
+                this, &TaskEditorViewModel::reloadCategories);
+    }
+    reloadCategories();
     rememberCurrentDraft();
     updateFormState();
 }
@@ -73,6 +110,30 @@ QVariant TaskEditorViewModel::data(const QModelIndex &index, const int role) con
         return statusText(candidate.status());
     case CandidatePriorityTextRole:
         return priorityText(candidate.priority());
+    case CandidateCategoryNameRole: {
+        if (!candidate.categoryId().has_value()) return QString{};
+        const auto iterator = std::find_if(
+            m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+                return category.id == *candidate.categoryId();
+            });
+        return iterator == m_categories.cend() ? QString{} : iterator->name;
+    }
+    case CandidateCategoryAccentRole: {
+        if (!candidate.categoryId().has_value()) return QString{};
+        const auto iterator = std::find_if(
+            m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+                return category.id == *candidate.categoryId();
+            });
+        return iterator == m_categories.cend()
+            ? QString{} : taskCategoryAccent(iterator->color);
+    }
+    case CandidateHasCategoryRole: {
+        if (!candidate.categoryId().has_value()) return false;
+        return std::any_of(m_categories.cbegin(), m_categories.cend(),
+                           [&](const auto &category) {
+                               return category.id == *candidate.categoryId();
+                           });
+    }
     case CandidateSelectedRole:
         return (m_predecessorPickerActive ? m_pickerPredecessors
                                           : m_selectedCreationPredecessors)
@@ -90,6 +151,9 @@ QHash<int, QByteArray> TaskEditorViewModel::roleNames() const
         {CandidateTitleRole, "candidateTitle"},
         {CandidateStatusTextRole, "candidateStatusText"},
         {CandidatePriorityTextRole, "candidatePriorityText"},
+        {CandidateCategoryNameRole, "candidateCategoryName"},
+        {CandidateCategoryAccentRole, "candidateCategoryAccent"},
+        {CandidateHasCategoryRole, "candidateHasCategory"},
         {CandidateSelectedRole, "candidateSelected"},
     };
 }
@@ -259,6 +323,77 @@ QStringList TaskEditorViewModel::priorityOptions() const
     };
 }
 
+QVariantList TaskEditorViewModel::categoryOptions() const
+{
+    QVariantList options;
+    options.reserve(m_categories.size() + 1);
+    options.append(QVariantMap{{QStringLiteral("categoryId"), QString{}},
+                               {QStringLiteral("name"), QStringLiteral("未分类")},
+                               {QStringLiteral("accent"), QStringLiteral("#94a3b8")}});
+    for (const auto &category : m_categories) {
+        options.append(QVariantMap{
+            {QStringLiteral("categoryId"), category.id.toString(QUuid::WithoutBraces)},
+            {QStringLiteral("name"), category.name},
+            {QStringLiteral("accent"), taskCategoryAccent(category.color)}});
+    }
+    return options;
+}
+
+QString TaskEditorViewModel::selectedCategoryId() const
+{
+    return m_categoryId.has_value()
+        ? m_categoryId->toString(QUuid::WithoutBraces) : QString{};
+}
+
+void TaskEditorViewModel::setSelectedCategoryId(const QString &categoryId)
+{
+    const QString trimmed = categoryId.trimmed();
+    std::optional<model::TaskCategoryId> selected;
+    if (!trimmed.isEmpty()) {
+        const model::TaskCategoryId id{QUuid::fromString(trimmed)};
+        const bool exists = std::any_of(
+            m_categories.cbegin(), m_categories.cend(),
+            [&id](const auto &category) { return category.id == id; });
+        if (id.isNull() || !exists) {
+            setErrorMessage(QStringLiteral("所选类别不存在或已被删除。"));
+            return;
+        }
+        selected = id;
+    }
+    if (m_categoryId == selected) return;
+    m_categoryId = selected;
+    emit categoryChanged();
+    updateFormState();
+    setErrorMessage({});
+}
+
+const model::TaskCategory *TaskEditorViewModel::selectedCategory() const
+{
+    if (!m_categoryId.has_value()) return nullptr;
+    const auto iterator = std::find_if(
+        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+            return category.id == *m_categoryId;
+        });
+    return iterator == m_categories.cend() ? nullptr : &*iterator;
+}
+
+QString TaskEditorViewModel::selectedCategoryName() const
+{
+    const auto *category = selectedCategory();
+    return category ? category->name : QStringLiteral("未分类");
+}
+
+QString TaskEditorViewModel::selectedCategoryAccent() const
+{
+    const auto *category = selectedCategory();
+    return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+}
+
+bool TaskEditorViewModel::hasCategory() const noexcept
+{
+    return m_categoryId.has_value();
+}
+
 bool TaskEditorViewModel::dirty() const noexcept
 {
     return m_dirty;
@@ -344,6 +479,7 @@ bool TaskEditorViewModel::beginEdit(const QString &taskId)
     draft.priorityIndex = static_cast<int>(task.priority());
     draft.deadline = task.deadline();
     draft.estimatedMinutes = task.estimatedMinutes();
+    draft.categoryId = task.categoryId();
 
     replaceCandidates({});
     replaceDraft(draft, task.id().toString(QUuid::WithoutBraces), true,
@@ -591,6 +727,7 @@ TaskEditorViewModel::Snapshot TaskEditorViewModel::currentSnapshot() const
         m_priorityIndex,
         m_deadline,
         m_estimatedMinutes,
+        m_categoryId,
         m_selectedCreationPredecessors,
     };
 }
@@ -607,6 +744,7 @@ void TaskEditorViewModel::replaceDraft(const Snapshot &draft, const QString &tas
     m_priorityIndex = draft.priorityIndex;
     m_deadline = draft.deadline;
     m_estimatedMinutes = draft.estimatedMinutes;
+    m_categoryId = draft.categoryId;
     m_selectedCreationPredecessors = draft.predecessorIds;
     m_pickerPredecessors = m_selectedCreationPredecessors;
     m_predecessorPickerActive = false;
@@ -619,6 +757,7 @@ void TaskEditorViewModel::replaceDraft(const Snapshot &draft, const QString &tas
     emit priorityIndexChanged();
     emit deadlineChanged();
     emit estimatedDurationChanged();
+    emit categoryChanged();
     emit predecessorSelectionChanged();
     notifyCandidateSelectionChanged();
     setErrorMessage({});
@@ -653,7 +792,7 @@ void TaskEditorViewModel::updateFormState()
     QString validationMessage;
     const auto validation = m_taskService.validateDraft(
         makeDraft(m_title, m_description, m_priorityIndex,
-                  m_deadline, m_estimatedMinutes));
+                  m_deadline, m_estimatedMinutes, m_categoryId));
     if (!validation.ok()) {
         validationMessage = taskErrorMessage(validation.error);
     }
@@ -688,7 +827,7 @@ std::optional<model::TaskDraft> TaskEditorViewModel::buildTaskDraft()
     }
 
     return makeDraft(m_title, m_description, m_priorityIndex,
-                     m_deadline, m_estimatedMinutes);
+                     m_deadline, m_estimatedMinutes, m_categoryId);
 }
 
 std::optional<QDateTime> TaskEditorViewModel::displayedDeadline() const
@@ -717,6 +856,49 @@ QString TaskEditorViewModel::statusText(const model::TaskStatus status)
 QString TaskEditorViewModel::priorityText(const model::TaskPriority priority)
 {
     return taskPriorityText(priority);
+}
+
+void TaskEditorViewModel::reloadCategories()
+{
+    QList<model::TaskCategory> categories;
+    if (m_categoryService) {
+        const auto result = m_categoryService->listCategories();
+        if (!result.ok()) {
+            setErrorMessage(QStringLiteral("类别数据访问失败，请稍后重试。"));
+            return;
+        }
+        categories = *result.value;
+    }
+    m_categories = std::move(categories);
+    emit categoryOptionsChanged();
+
+    // 若数据库中的原类别已被管理命令删除，持久化快照已经自动转为未分类；
+    // 同步原始草稿可避免把该外部变化误判为用户编辑。
+    if (m_editMode && m_original.categoryId.has_value()) {
+        const auto originalId = *m_original.categoryId;
+        const bool originalStillExists = std::any_of(
+            m_categories.cbegin(), m_categories.cend(),
+            [&originalId](const auto &category) {
+                return category.id == originalId;
+            });
+        if (!originalStillExists) {
+            m_original.categoryId.reset();
+        }
+    }
+
+    // 删除类别是管理操作例外；若当前草稿引用了被删除类别，只清空类别字段，
+    // 其他输入仍留在本地，避免用户丢失尚未保存的编辑内容。
+    if (m_categoryId.has_value() && selectedCategory() == nullptr) {
+        m_categoryId.reset();
+        emit categoryChanged();
+        updateFormState();
+        setErrorMessage(QStringLiteral("原选择的类别已删除，任务将保存为未分类。"));
+    }
+    if (!m_predecessorCandidates.isEmpty()) {
+        emit dataChanged(index(0), index(m_predecessorCandidates.size() - 1),
+                         {CandidateCategoryNameRole, CandidateCategoryAccentRole,
+                          CandidateHasCategoryRole});
+    }
 }
 
 } // namespace smartmate::viewmodel

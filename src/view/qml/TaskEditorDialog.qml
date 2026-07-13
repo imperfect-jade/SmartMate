@@ -9,6 +9,7 @@ Dialog {
     objectName: "taskEditorDialog"
     required property TaskEditorViewModel editor
     required property AppearanceTheme theme
+    signal manageCategoriesRequested()
 
     readonly property bool narrowForm: width < theme.px(610)
 
@@ -184,6 +185,35 @@ Dialog {
                                 model: root.editor.priorityOptions
                                 currentIndex: root.editor.priorityIndex
                                 onActivated: index => root.editor.priorityIndex = index
+                            }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.columnSpan: root.narrowForm ? 1 : 2
+                            Label {
+                                text: qsTr("类别")
+                                color: root.theme.textBody
+                                font.bold: true
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: root.theme.px(8)
+                                ComboBox {
+                                    id: taskCategoryComboBox
+                                    objectName: "taskCategoryComboBox"
+                                    Layout.fillWidth: true
+                                    model: root.editor.categoryOptions
+                                    textRole: "name"
+                                    valueRole: "categoryId"
+                                    currentIndex: taskCategoryComboBox.indexOfValue(
+                                                      root.editor.selectedCategoryId)
+                                    onActivated: root.editor.selectedCategoryId = currentValue
+                                }
+                                Button {
+                                    objectName: "manageCategoriesFromEditorButton"
+                                    text: qsTr("管理类别")
+                                    onClicked: root.manageCategoriesRequested()
+                                }
                             }
                         }
                     }

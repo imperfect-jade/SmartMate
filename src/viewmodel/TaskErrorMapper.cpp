@@ -47,6 +47,8 @@ QString taskErrorMessage(const model::TaskError error)
         return QStringLiteral("只有归档任务可以永久删除。");
     case EmptyTaskSelection:
         return QStringLiteral("请至少选择一项可以批量处理的任务。");
+    case TaskCategoryNotFound:
+        return QStringLiteral("所选类别不存在或已被删除，请重新选择。");
     case NotFound:
         return QStringLiteral("任务不存在或已无法访问。");
     case InProgressConflict:

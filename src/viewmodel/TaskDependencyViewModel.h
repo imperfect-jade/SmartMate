@@ -10,6 +10,7 @@
 
 namespace smartmate::model {
 class TaskService;
+class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -40,11 +41,17 @@ public:
         SelectedRole,
         ArchivedRole,
         SelectableRole,
+        CategoryNameRole,
+        CategoryAccentRole,
+        HasCategoryRole,
     };
     Q_ENUM(Role)
 
     explicit TaskDependencyViewModel(model::TaskService &taskService,
                                      QObject *parent = nullptr);
+    TaskDependencyViewModel(model::TaskService &taskService,
+                            model::TaskCategoryService &categoryService,
+                            QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex &index, int role) const override;
@@ -89,9 +96,18 @@ private:
     void replaceDraft(model::TaskDependencyEditContext context);
     void notifySelectionChanged();
     void setErrorMessage(const QString &message);
+    void reloadCategories();
+    [[nodiscard]] const model::TaskCategory *categoryForTask(
+        const model::Task &task) const;
+
+    TaskDependencyViewModel(model::TaskService &taskService,
+                            model::TaskCategoryService *categoryService,
+                            QObject *parent);
 
     /// 非拥有引用；组合根保证 Service 生命周期长于本 ViewModel。
     model::TaskService &m_taskService;
+    model::TaskCategoryService *m_categoryService{nullptr};
+    QList<model::TaskCategory> m_categories;
     model::TaskId m_taskId;
     QString m_taskTitle;
     /// 候选列表排除当前任务；未归档任务可新增，原有归档前置仍保留以便移除。

@@ -118,6 +118,38 @@ TestCase {
         compare(edge.arrowTipY, end.y)
     }
 
+    function test_categoryScopeKeepsOnlyDirectExternalContext() {
+        showGraphPage()
+        const categoryFilter = findChild(subject, "graphCategoryFilter")
+        const nodeRepeater = findChild(subject, "dependencyGraphNodeRepeater")
+        const edgeRepeater = findChild(subject, "dependencyGraphEdgeRepeater")
+        verify(categoryFilter !== null)
+        verify(nodeRepeater !== null)
+        verify(edgeRepeater !== null)
+
+        const studyIndex = categoryFilter.indexOfValue(graphStudyCategoryId)
+        verify(studyIndex >= 2)
+        categoryFilter.activated(studyIndex)
+        tryCompare(graphTestAppViewModel.taskGraph, "categoryFilterMode", 2)
+        tryCompare(nodeRepeater, "count", 2)
+        tryCompare(edgeRepeater, "count", 1)
+
+        const predecessor = graphNodeDelegate(graphPredecessorId)
+        const successor = graphNodeDelegate(graphSuccessorId)
+        verify(predecessor !== null)
+        verify(successor !== null)
+        compare(predecessor.coreNode, true)
+        compare(predecessor.categoryName, "学习")
+        compare(successor.coreNode, false)
+        compare(successor.categoryName, "工作")
+        verify(successor.opacity < predecessor.opacity)
+
+        // 列表和图的类别条件是彼此独立的会话状态。
+        compare(graphTestAppViewModel.taskList.categoryFilterMode, 0)
+        verify(graphTestAppViewModel.taskGraph.setCategoryFilter(0, ""))
+        tryCompare(graphTestAppViewModel.taskGraph, "categoryFilterMode", 0)
+    }
+
     function test_cancelledEdgeUsesGreyProjectionAndRedoReactivatesIt() {
         showGraphPage()
         const edgeRepeater = findChild(subject, "dependencyGraphEdgeRepeater")

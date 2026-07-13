@@ -35,6 +35,7 @@ enum class TaskError {
     DependencyStateConflict,
     TaskDetailsNotEditable,
     TaskDeletionNotAllowed,
+    TaskCategoryNotFound,
     EmptyTaskSelection,
     NotFound,
     InProgressConflict,

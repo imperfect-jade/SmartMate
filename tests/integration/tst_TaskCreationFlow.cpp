@@ -3,6 +3,7 @@
 #include "TaskListViewModel.h"
 #include "domain/TaskCreationRequest.h"
 #include "persistence/SqliteTaskRepository.h"
+#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QSignalSpy>
@@ -13,8 +14,13 @@
 #include <algorithm>
 
 using smartmate::model::TaskCreationRequest;
+using smartmate::model::TaskCategoryColor;
+using smartmate::model::TaskCategoryId;
+using smartmate::model::TaskCategoryService;
 using smartmate::model::TaskDraft;
 using smartmate::model::TaskDependencyResolution;
+using smartmate::model::TaskGraphCategoryScope;
+using smartmate::model::TaskGraphQuery;
 using smartmate::model::TaskGraphNode;
 using smartmate::model::TaskId;
 using smartmate::model::TaskPriority;
@@ -35,12 +41,14 @@ private slots:
     void cancelledDependencyRemainsStoredAndDerivedAfterReopen();
     void permanentlyDeletesArchivedTaskAndRefreshesDependencyState();
     void batchDeletesConnectedArchivedTasksAndRecalculatesAfterReopen();
+    void persistsCategoriesAndScopesCrossCategoryGraphAfterReopen();
 };
 
 void TaskCreationFlowTest::createsAndReadsTaskWhenOptionalDescriptionIsUntouched()
 {
     SqliteTaskRepository repository{QStringLiteral(":memory:")};
-    TaskService service{repository, repository, repository, repository, repository};
+    TaskService service{repository, repository, repository, repository, repository,
+                        repository};
     AppViewModel appViewModel{service};
     auto *editor = appViewModel.taskEditor();
     auto *taskList = appViewModel.taskList();
@@ -73,7 +81,8 @@ void TaskCreationFlowTest::createsAndReadsTaskWhenOptionalDescriptionIsUntouched
 void TaskCreationFlowTest::derivedSearchAndOrderingDoNotModifyStoredTasks()
 {
     SqliteTaskRepository repository{QStringLiteral(":memory:")};
-    TaskService service{repository, repository, repository, repository, repository};
+    TaskService service{repository, repository, repository, repository, repository,
+                        repository};
 
     TaskDraft urgentDraft;
     urgentDraft.title = QStringLiteral("准备课程答辩");
@@ -112,7 +121,8 @@ void TaskCreationFlowTest::atomicallyCreatesDependencyAndUnlocksAfterReopen()
     TaskId successorId;
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
         QSignalSpy tasksChangedSpy{&service, &TaskService::tasksChanged};
         QSignalSpy dependenciesChangedSpy{&service,
                                           &TaskService::dependenciesChanged};
@@ -142,7 +152,8 @@ void TaskCreationFlowTest::atomicallyCreatesDependencyAndUnlocksAfterReopen()
 
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
 
         const auto dependencies = service.listDependencies();
         QVERIFY(dependencies.ok());
@@ -190,7 +201,8 @@ void TaskCreationFlowTest::cancelledDependencyRemainsStoredAndDerivedAfterReopen
     TaskId successorId;
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
         TaskDraft predecessorDraft;
         predecessorDraft.title = QStringLiteral("可取消前置");
         const auto predecessor = service.createTask(predecessorDraft);
@@ -208,7 +220,8 @@ void TaskCreationFlowTest::cancelledDependencyRemainsStoredAndDerivedAfterReopen
 
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
         const auto dependencies = service.listDependencies();
         QVERIFY(dependencies.ok());
         QCOMPARE(dependencies.value->size(), 1);
@@ -248,7 +261,8 @@ void TaskCreationFlowTest::permanentlyDeletesArchivedTaskAndRefreshesDependencyS
 
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
         TaskDraft predecessorDraft;
         predecessorDraft.title = QStringLiteral("将被永久删除的前置");
         const auto predecessor = service.createTask(predecessorDraft);
@@ -284,7 +298,8 @@ void TaskCreationFlowTest::permanentlyDeletesArchivedTaskAndRefreshesDependencyS
 
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
         QVERIFY(!repository.findById(predecessorId).has_value());
         QVERIFY(repository.findById(successorId).has_value());
         QVERIFY(repository.findAllDependencies().isEmpty());
@@ -306,7 +321,8 @@ void TaskCreationFlowTest::batchDeletesConnectedArchivedTasksAndRecalculatesAfte
 
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
 
         TaskDraft firstDraft;
         firstDraft.title = QStringLiteral("批量删除链首");
@@ -356,7 +372,8 @@ void TaskCreationFlowTest::batchDeletesConnectedArchivedTasksAndRecalculatesAfte
     // 重启后只剩活动后继，依赖图不会保留已永久删除节点或悬空边。
     {
         SqliteTaskRepository repository{databasePath};
-        TaskService service{repository, repository, repository, repository, repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
         QVERIFY(!repository.findById(firstId).has_value());
         QVERIFY(!repository.findById(secondId).has_value());
         QVERIFY(repository.findById(successorId).has_value());
@@ -365,6 +382,174 @@ void TaskCreationFlowTest::batchDeletesConnectedArchivedTasksAndRecalculatesAfte
         QVERIFY(plan.ok());
         QCOMPARE(plan.value->size(), 1);
         QCOMPARE(plan.value->constFirst().task.id(), successorId);
+    }
+}
+
+void TaskCreationFlowTest::persistsCategoriesAndScopesCrossCategoryGraphAfterReopen()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString databasePath = directory.filePath(QStringLiteral("smartmate.db"));
+
+    TaskCategoryId studyCategoryId;
+    TaskCategoryId workCategoryId;
+    TaskId distantWorkTaskId;
+    TaskId directPredecessorId;
+    TaskId studyTaskId;
+    TaskId directSuccessorId;
+
+    {
+        SqliteTaskRepository repository{databasePath};
+        TaskCategoryService categoryService{repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
+
+        const auto studyCategory = categoryService.createCategory(
+            {QStringLiteral("学习"), TaskCategoryColor::Blue});
+        const auto workCategory = categoryService.createCategory(
+            {QStringLiteral("工作"), TaskCategoryColor::Teal});
+        QVERIFY2(studyCategory.ok(), qPrintable(studyCategory.detail));
+        QVERIFY2(workCategory.ok(), qPrintable(workCategory.detail));
+        studyCategoryId = studyCategory.value->id;
+        workCategoryId = workCategory.value->id;
+
+        TaskDraft distantWorkDraft;
+        distantWorkDraft.title = QStringLiteral("两跳之外的工作任务");
+        distantWorkDraft.categoryId = workCategoryId;
+        const auto distantWorkTask = service.createTask(distantWorkDraft);
+        QVERIFY(distantWorkTask.ok());
+        distantWorkTaskId = distantWorkTask.value->id();
+
+        TaskDraft directPredecessorDraft;
+        directPredecessorDraft.title = QStringLiteral("学习任务的直接工作前置");
+        directPredecessorDraft.categoryId = workCategoryId;
+        const auto directPredecessor = service.createTask(
+            TaskCreationRequest{directPredecessorDraft, {distantWorkTaskId}});
+        QVERIFY2(directPredecessor.ok(), qPrintable(directPredecessor.detail));
+        directPredecessorId = directPredecessor.value->id();
+
+        TaskDraft studyDraft;
+        studyDraft.title = QStringLiteral("分类图核心学习任务");
+        studyDraft.categoryId = studyCategoryId;
+        const auto studyTask = service.createTask(
+            TaskCreationRequest{studyDraft, {directPredecessorId}});
+        QVERIFY2(studyTask.ok(), qPrintable(studyTask.detail));
+        studyTaskId = studyTask.value->id();
+
+        TaskDraft directSuccessorDraft;
+        directSuccessorDraft.title = QStringLiteral("学习任务的直接工作后继");
+        directSuccessorDraft.categoryId = workCategoryId;
+        const auto directSuccessor = service.createTask(
+            TaskCreationRequest{directSuccessorDraft, {studyTaskId}});
+        QVERIFY2(directSuccessor.ok(), qPrintable(directSuccessor.detail));
+        directSuccessorId = directSuccessor.value->id();
+    }
+
+    {
+        SqliteTaskRepository repository{databasePath};
+        TaskCategoryService categoryService{repository};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
+
+        // 重启后类别、任务归属与跨类别依赖必须从SQLite完整重建。
+        const auto categories = categoryService.listCategories();
+        QVERIFY(categories.ok());
+        QCOMPARE(categories.value->size(), 2);
+        QVERIFY(repository.findCategoryById(studyCategoryId).has_value());
+        QVERIFY(repository.findCategoryById(workCategoryId).has_value());
+        const auto storedStudyTask = repository.findById(studyTaskId);
+        QVERIFY(storedStudyTask.has_value());
+        QCOMPARE(storedStudyTask->categoryId(),
+                 std::optional<TaskCategoryId>{studyCategoryId});
+        QCOMPARE(repository.findAllDependencies().size(), 3);
+
+        TaskGraphQuery studyQuery;
+        studyQuery.scope = TaskGraphCategoryScope::SpecificCategory;
+        studyQuery.categoryId = studyCategoryId;
+        const auto scopedGraph = service.taskGraphSnapshot(studyQuery);
+        QVERIFY2(scopedGraph.ok(), qPrintable(scopedGraph.detail));
+        QCOMPARE(scopedGraph.value->nodes.size(), 3);
+        QCOMPARE(scopedGraph.value->edges.size(), 2);
+
+        const auto nodeById = [&scopedGraph](const TaskId &id)
+            -> const TaskGraphNode * {
+            const auto iterator = std::find_if(
+                scopedGraph.value->nodes.cbegin(), scopedGraph.value->nodes.cend(),
+                [&id](const TaskGraphNode &node) { return node.task.id() == id; });
+            return iterator == scopedGraph.value->nodes.cend() ? nullptr
+                                                                : &*iterator;
+        };
+        const TaskGraphNode *studyNode = nodeById(studyTaskId);
+        const TaskGraphNode *predecessorNode = nodeById(directPredecessorId);
+        const TaskGraphNode *successorNode = nodeById(directSuccessorId);
+        QVERIFY(studyNode != nullptr);
+        QVERIFY(predecessorNode != nullptr);
+        QVERIFY(successorNode != nullptr);
+        QVERIFY(studyNode->coreNode);
+        QVERIFY(!predecessorNode->coreNode);
+        QVERIFY(!successorNode->coreNode);
+        QVERIFY(nodeById(distantWorkTaskId) == nullptr);
+
+        const auto hasEdge = [&scopedGraph](const TaskId &predecessorId,
+                                             const TaskId &successorId) {
+            return std::any_of(
+                scopedGraph.value->edges.cbegin(), scopedGraph.value->edges.cend(),
+                [&predecessorId, &successorId](const auto &edge) {
+                return edge.dependency.predecessorId == predecessorId
+                    && edge.dependency.successorId == successorId;
+            });
+        };
+        QVERIFY(hasEdge(directPredecessorId, studyTaskId));
+        QVERIFY(hasEdge(studyTaskId, directSuccessorId));
+        QVERIFY(!hasEdge(distantWorkTaskId, directPredecessorId));
+
+        QSignalSpy categoriesChangedSpy{
+            &categoryService, &TaskCategoryService::categoriesChanged};
+        QSignalSpy assignmentsChangedSpy{
+            &categoryService,
+            &TaskCategoryService::taskCategoryAssignmentsChanged};
+        const auto deletion = categoryService.deleteCategory(studyCategoryId);
+        QVERIFY2(deletion.ok(), qPrintable(deletion.detail));
+        QCOMPARE(deletion.value->unassignedTaskCount, 1);
+        QCOMPARE(categoriesChangedSpy.count(), 1);
+        QCOMPARE(assignmentsChangedSpy.count(), 1);
+
+        const auto unassignedStudyTask = repository.findById(studyTaskId);
+        QVERIFY(unassignedStudyTask.has_value());
+        QVERIFY(!unassignedStudyTask->categoryId().has_value());
+        const auto storedPredecessor = repository.findById(directPredecessorId);
+        QVERIFY(storedPredecessor.has_value());
+        QCOMPARE(storedPredecessor->categoryId(),
+                 std::optional<TaskCategoryId>{workCategoryId});
+        // 删除类别只解除任务归属，不得清理或改写任何依赖边。
+        QCOMPARE(repository.findAllDependencies().size(), 3);
+
+        TaskGraphQuery uncategorizedQuery;
+        uncategorizedQuery.scope = TaskGraphCategoryScope::Uncategorized;
+        const auto uncategorizedGraph = service.taskGraphSnapshot(uncategorizedQuery);
+        QVERIFY2(uncategorizedGraph.ok(), qPrintable(uncategorizedGraph.detail));
+        QCOMPARE(uncategorizedGraph.value->nodes.size(), 3);
+        QCOMPARE(uncategorizedGraph.value->edges.size(), 2);
+    }
+
+    // 再次重启验证类别删除、未分类归属和原有依赖关系同时持久化。
+    {
+        SqliteTaskRepository repository{databasePath};
+        TaskService service{repository, repository, repository, repository, repository,
+                            repository};
+        QVERIFY(!repository.findCategoryById(studyCategoryId).has_value());
+        QVERIFY(repository.findCategoryById(workCategoryId).has_value());
+        const auto studyTask = repository.findById(studyTaskId);
+        QVERIFY(studyTask.has_value());
+        QVERIFY(!studyTask->categoryId().has_value());
+        QCOMPARE(repository.findAllDependencies().size(), 3);
+
+        TaskGraphQuery uncategorizedQuery;
+        uncategorizedQuery.scope = TaskGraphCategoryScope::Uncategorized;
+        const auto graph = service.taskGraphSnapshot(uncategorizedQuery);
+        QVERIFY(graph.ok());
+        QCOMPARE(graph.value->nodes.size(), 3);
+        QCOMPARE(graph.value->edges.size(), 2);
     }
 }
 

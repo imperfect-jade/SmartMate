@@ -3,6 +3,7 @@
 #include "fakes/FakeTaskCreationRepository.h"
 #include "fakes/FakeTaskBatchTransitionRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
+#include "fakes/FakeTaskCategoryRepository.h"
 
 #include "dependencies/TaskDependencyGraph.h"
 #include "planner/TaskCommandPolicy.h"
@@ -28,6 +29,7 @@ using smartmate::model::TaskOrderReason;
 using smartmate::model::TaskPriority;
 using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
+using smartmate::tests::FakeTaskCategoryRepository;
 using smartmate::model::orderTasks;
 using smartmate::model::taskCommandAvailabilities;
 using smartmate::tests::FakeTaskDependencyRepository;
@@ -529,9 +531,10 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     FakeTaskBatchTransitionRepository batchTransitionRepository{repository};
     FakeTaskDeletionRepository deletionRepository;
+    FakeTaskCategoryRepository categoryRepository;
     const TaskService service{repository, dependencyRepository,
                               creationRepository, batchTransitionRepository,
-                              deletionRepository};
+                              deletionRepository, categoryRepository};
 
     const auto result = service.listRecommendedTasks();
     QVERIFY(result.ok());
@@ -550,7 +553,7 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
     FakeTaskBatchTransitionRepository cyclicBatchTransition{repository};
     const TaskService cyclicService{repository, cyclicDependencies,
                                     cyclicCreation, cyclicBatchTransition,
-                                    deletionRepository};
+                                    deletionRepository, categoryRepository};
     const auto cycle = cyclicService.listRecommendedTasks();
     QCOMPARE(cycle.error, TaskError::DependencyCycle);
     QCOMPARE(cycle.context.cyclePath.constFirst(),
@@ -583,7 +586,7 @@ void TaskOrderingPolicyTest::serviceReturnsPlanAndMapsRepositoryFailure()
     const TaskService inconsistentService{
         inconsistentRepository, inconsistentDependencies,
         inconsistentCreation, inconsistentBatchTransition,
-        deletionRepository};
+        deletionRepository, categoryRepository};
     const auto inconsistentPlan = inconsistentService.listRecommendedTasks();
     QCOMPARE(inconsistentPlan.error, TaskError::DependencyStateConflict);
     QCOMPARE(inconsistentService.taskGraphSnapshot().error,

@@ -69,10 +69,13 @@ Dialog {
                     required property string candidateTitle
                     required property string candidateStatusText
                     required property string candidatePriorityText
+                    required property string candidateCategoryName
+                    required property string candidateCategoryAccent
+                    required property bool candidateHasCategory
                     required property bool candidateSelected
 
                     width: ListView.view.width
-                    height: root.theme.px(64)
+                    height: root.theme.px(72)
                     radius: 6
                     color: candidateSelected ? root.theme.primarySoft : root.theme.surfaceElevated
                     border.color: candidateSelected ? root.theme.primary : root.theme.borderSoft
@@ -108,6 +111,15 @@ Dialog {
                                 text: qsTr("ID %1").arg(candidateDelegate.candidateShortId)
                                 color: root.theme.textMuted
                                 font.pixelSize: 11
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: candidateDelegate.candidateHasCategory
+                                text: qsTr("类别：%1").arg(
+                                          candidateDelegate.candidateCategoryName)
+                                color: candidateDelegate.candidateCategoryAccent
+                                font.pixelSize: root.theme.px(11)
+                                elide: Text.ElideRight
                             }
                         }
 

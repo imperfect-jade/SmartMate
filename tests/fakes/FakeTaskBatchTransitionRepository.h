@@ -54,7 +54,8 @@ public:
                                     iterator->deadline(),
                                     iterator->estimatedMinutes(),
                                     iterator->createdAtUtc(),
-                                    change.updatedAtUtc};
+                                    change.updatedAtUtc,
+                                    iterator->categoryId()};
         }
         if (!conflicts.isEmpty()) {
             return {0, std::move(conflicts)};

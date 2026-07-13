@@ -2,7 +2,9 @@
 
 #include "TaskErrorMapper.h"
 #include "TaskPresentationFormatter.h"
+#include "TaskCategoryPresentation.h"
 #include "planner/TaskOrderingPolicy.h"
+#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
@@ -78,8 +80,25 @@ const model::TaskCommandAvailability emptyAvailability{};
 }
 
 TaskListViewModel::TaskListViewModel(model::TaskService &taskService, QObject *parent)
+    : TaskListViewModel(taskService, nullptr, parent)
+{
+}
+
+TaskListViewModel::TaskListViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService &categoryService,
+    QObject *parent)
+    : TaskListViewModel(taskService, &categoryService, parent)
+{
+}
+
+TaskListViewModel::TaskListViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService *categoryService,
+    QObject *parent)
     : QAbstractListModel(parent)
     , m_taskService(taskService)
+    , m_categoryService(categoryService)
     , m_reloadTimer(this)
 {
     // Service 是多个 ViewModel 共享的状态源；成功写入后的统一信号会触发
@@ -88,8 +107,16 @@ TaskListViewModel::TaskListViewModel(model::TaskService &taskService, QObject *p
             &TaskListViewModel::reload);
     connect(&m_taskService, &model::TaskService::dependenciesChanged, this,
             &TaskListViewModel::reload);
+    if (m_categoryService) {
+        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
+                this, &TaskListViewModel::reloadCategories);
+        connect(m_categoryService,
+                &model::TaskCategoryService::taskCategoryAssignmentsChanged,
+                this, &TaskListViewModel::reload);
+    }
     connect(&m_reloadTimer, &QTimer::timeout, this, &TaskListViewModel::reload);
     m_reloadTimer.start(60'000);
+    reloadCategories();
     reload();
 }
 
@@ -167,6 +194,19 @@ QVariant TaskListViewModel::data(const QModelIndex &index, const int role) const
         return m_bulkSelectedTaskIds.contains(task.id());
     case BulkSelectableRole:
         return isBulkSelectable(task.id());
+    case CategoryIdRole:
+        return task.categoryId().has_value()
+            ? task.categoryId()->toString(QUuid::WithoutBraces) : QString{};
+    case CategoryNameRole: {
+        const auto *category = categoryForTask(&task);
+        return category ? category->name : QString{};
+    }
+    case CategoryAccentRole: {
+        const auto *category = categoryForTask(&task);
+        return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+    }
+    case HasCategoryRole:
+        return categoryForTask(&task) != nullptr;
     default:
         return {};
     }
@@ -202,6 +242,10 @@ QHash<int, QByteArray> TaskListViewModel::roleNames() const
         {CanDeletePermanentlyRole, "canDeletePermanently"},
         {BulkSelectedRole, "bulkSelected"},
         {BulkSelectableRole, "bulkSelectable"},
+        {CategoryIdRole, "categoryId"},
+        {CategoryNameRole, "categoryName"},
+        {CategoryAccentRole, "categoryAccent"},
+        {HasCategoryRole, "hasCategory"},
     };
 }
 
@@ -229,10 +273,45 @@ QStringList TaskListViewModel::priorityFilterOptions() const
             QStringLiteral("紧急")};
 }
 
+QVariantList TaskListViewModel::categoryFilterOptions() const
+{
+    QVariantList options;
+    options.reserve(m_categories.size() + 2);
+    options.append(QVariantMap{{QStringLiteral("mode"), 0},
+                               {QStringLiteral("categoryId"), QString{}},
+                               {QStringLiteral("name"), QStringLiteral("全部类别")},
+                               {QStringLiteral("accent"), QStringLiteral("#64748b")}});
+    options.append(QVariantMap{{QStringLiteral("mode"), 1},
+                               {QStringLiteral("categoryId"), QString{}},
+                               {QStringLiteral("name"), QStringLiteral("未分类")},
+                               {QStringLiteral("accent"), QStringLiteral("#94a3b8")}});
+    for (const auto &category : m_categories) {
+        options.append(QVariantMap{
+            {QStringLiteral("mode"), 2},
+            {QStringLiteral("categoryId"), category.id.toString(QUuid::WithoutBraces)},
+            {QStringLiteral("name"), category.name},
+            {QStringLiteral("accent"), taskCategoryAccent(category.color)}});
+    }
+    return options;
+}
+
+int TaskListViewModel::categoryFilterMode() const noexcept
+{
+    return m_categoryFilterMode;
+}
+
+QString TaskListViewModel::categoryFilterCategoryId() const
+{
+    return m_categoryFilterMode == 2 && !m_categoryFilterCategoryId.isNull()
+        ? m_categoryFilterCategoryId.toString(QUuid::WithoutBraces)
+        : QString{};
+}
+
 bool TaskListViewModel::hasActiveFilters() const
 {
     return !m_searchText.trimmed().isEmpty()
-        || m_priorityFilterIndex != allPrioritiesFilterIndex;
+        || m_priorityFilterIndex != allPrioritiesFilterIndex
+        || m_categoryFilterMode != 0;
 }
 
 bool TaskListViewModel::bulkSelectionMode() const noexcept
@@ -357,6 +436,23 @@ bool TaskListViewModel::focusCanComplete() const noexcept
     return availabilityFor(m_focusTaskId).canComplete;
 }
 
+QString TaskListViewModel::focusCategoryName() const
+{
+    const auto *category = categoryForTask(focusTask());
+    return category ? category->name : QString{};
+}
+
+QString TaskListViewModel::focusCategoryAccent() const
+{
+    const auto *category = categoryForTask(focusTask());
+    return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+}
+
+bool TaskListViewModel::focusHasCategory() const noexcept
+{
+    return categoryForTask(focusTask()) != nullptr;
+}
+
 QString TaskListViewModel::selectedTaskId() const
 {
     return m_selectedTaskId.isNull()
@@ -451,6 +547,23 @@ bool TaskListViewModel::selectedCanEditDependencies() const noexcept
     return availabilityFor(m_selectedTaskId).canEditDependencies;
 }
 
+QString TaskListViewModel::selectedCategoryName() const
+{
+    const auto *category = categoryForTask(selectedTask());
+    return category ? category->name : QString{};
+}
+
+QString TaskListViewModel::selectedCategoryAccent() const
+{
+    const auto *category = categoryForTask(selectedTask());
+    return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+}
+
+bool TaskListViewModel::selectedHasCategory() const noexcept
+{
+    return categoryForTask(selectedTask()) != nullptr;
+}
+
 void TaskListViewModel::setShowArchived(const bool showArchived)
 {
     if (m_showArchived == showArchived) {
@@ -496,6 +609,31 @@ void TaskListViewModel::setPriorityFilterIndex(const int priorityFilterIndex)
         emit hasActiveFiltersChanged();
     }
     rebuildVisibleTasks();
+}
+
+bool TaskListViewModel::setCategoryFilter(const int mode,
+                                          const QString &categoryId)
+{
+    if (mode < 0 || mode > 2) return false;
+    model::TaskCategoryId id;
+    if (mode == 2) {
+        id = QUuid::fromString(categoryId.trimmed());
+        const bool exists = std::any_of(
+            m_categories.cbegin(), m_categories.cend(),
+            [&id](const auto &category) { return category.id == id; });
+        if (id.isNull() || !exists) return false;
+    }
+    if (m_categoryFilterMode == mode
+        && (mode != 2 || m_categoryFilterCategoryId == id)) return true;
+
+    const bool previouslyActive = hasActiveFilters();
+    m_bulkSelectedTaskIds.clear();
+    m_categoryFilterMode = mode;
+    m_categoryFilterCategoryId = mode == 2 ? id : model::TaskCategoryId{};
+    emit categoryFilterChanged();
+    if (previouslyActive != hasActiveFilters()) emit hasActiveFiltersChanged();
+    rebuildVisibleTasks();
+    return true;
 }
 
 void TaskListViewModel::reload()
@@ -571,7 +709,8 @@ void TaskListViewModel::clearFilters()
     const bool searchChanged = !m_searchText.isEmpty();
     const bool priorityChanged =
         m_priorityFilterIndex != allPrioritiesFilterIndex;
-    if (!searchChanged && !priorityChanged) {
+    const bool categoryChanged = m_categoryFilterMode != 0;
+    if (!searchChanged && !priorityChanged && !categoryChanged) {
         return;
     }
 
@@ -579,12 +718,15 @@ void TaskListViewModel::clearFilters()
     m_bulkSelectedTaskIds.clear();
     m_searchText.clear();
     m_priorityFilterIndex = allPrioritiesFilterIndex;
+    m_categoryFilterMode = 0;
+    m_categoryFilterCategoryId = model::TaskCategoryId{};
     if (searchChanged) {
         emit searchTextChanged();
     }
     if (priorityChanged) {
         emit priorityFilterIndexChanged();
     }
+    if (categoryChanged) emit categoryFilterChanged();
     if (previouslyActive != hasActiveFilters()) {
         emit hasActiveFiltersChanged();
     }
@@ -1018,6 +1160,14 @@ void TaskListViewModel::rebuildVisibleTasks()
         if (filtersPriority && task.priority() != selectedPriority) {
             continue;
         }
+        if (m_categoryFilterMode == 1 && task.categoryId().has_value()) {
+            continue;
+        }
+        if (m_categoryFilterMode == 2
+            && (!task.categoryId().has_value()
+                || *task.categoryId() != m_categoryFilterCategoryId)) {
+            continue;
+        }
         // 过滤只删除不匹配项，剩余任务严格保留Model给出的计划顺序。
         m_visibleTasks.push_back(task);
         m_visibleTaskIds.insert(task.id());
@@ -1028,6 +1178,51 @@ void TaskListViewModel::rebuildVisibleTasks()
     endResetModel();
     emit countChanged();
     emit bulkSelectionChanged();
+}
+
+void TaskListViewModel::reloadCategories()
+{
+    QList<model::TaskCategory> categories;
+    if (m_categoryService) {
+        const auto result = m_categoryService->listCategories();
+        if (!result.ok()) {
+            setError(QStringLiteral("类别数据访问失败，请稍后重试。"));
+            return;
+        }
+        categories = *result.value;
+    }
+    m_categories = std::move(categories);
+    emit categoryOptionsChanged();
+
+    if (m_categoryFilterMode == 2) {
+        const bool exists = std::any_of(
+            m_categories.cbegin(), m_categories.cend(),
+            [this](const auto &category) {
+                return category.id == m_categoryFilterCategoryId;
+            });
+        if (!exists) {
+            // 删除当前筛选类别后，相关任务已原子转为未分类，保持用户视角连续。
+            m_categoryFilterMode = 1;
+            m_categoryFilterCategoryId = model::TaskCategoryId{};
+            m_bulkSelectedTaskIds.clear();
+            emit categoryFilterChanged();
+            emit hasActiveFiltersChanged();
+        }
+    }
+    rebuildVisibleTasks();
+    emit focusTaskChanged();
+    emit selectionChanged();
+}
+
+const model::TaskCategory *TaskListViewModel::categoryForTask(
+    const model::Task *task) const
+{
+    if (!task || !task->categoryId().has_value()) return nullptr;
+    const auto iterator = std::find_if(
+        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+            return category.id == *task->categoryId();
+        });
+    return iterator == m_categories.cend() ? nullptr : &*iterator;
 }
 
 void TaskListViewModel::setError(const QString &message)

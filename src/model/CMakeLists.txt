@@ -3,6 +3,8 @@ add_library(smartmate_model STATIC
     domain/AppearanceSettings.cpp
     domain/Task.h
     domain/Task.cpp
+    domain/TaskCategory.h
+    domain/TaskCategory.cpp
     domain/TaskCommandAvailability.h
     domain/TaskConstraints.h
     domain/TaskCreationRequest.h
@@ -27,10 +29,14 @@ add_library(smartmate_model STATIC
     repositories/ITaskDeletionRepository.h
     repositories/ITaskDependencyRepository.h
     repositories/ITaskRepository.h
+    repositories/ITaskCategoryRepository.h
     services/TaskService.h
     services/TaskService.cpp
     services/TaskServiceSupport.h
     services/TaskResult.h
+    services/TaskCategoryResult.h
+    services/TaskCategoryService.h
+    services/TaskCategoryService.cpp
     services/TaskDraftValidator.h
     services/TaskDraftValidator.cpp
     services/AppearanceSettingsService.h

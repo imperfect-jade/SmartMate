@@ -78,6 +78,29 @@ Rectangle {
                     font.bold: true
                 }
                 Rectangle {
+                    objectName: "focusCategoryBadge"
+                    visible: focus.taskList.focusHasCategory
+                    Layout.maximumWidth: focus.theme.px(120)
+                    implicitWidth: Math.min(focus.theme.px(120),
+                                            focusCategoryLabel.implicitWidth + 16)
+                    implicitHeight: focusCategoryLabel.implicitHeight + 6
+                    radius: height / 2
+                    color: Qt.alpha(focus.taskList.focusCategoryAccent, 0.12)
+                    border.color: focus.taskList.focusCategoryAccent
+                    Label {
+                        id: focusCategoryLabel
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        verticalAlignment: Text.AlignVCenter
+                        text: focus.taskList.focusCategoryName
+                        color: focus.taskList.focusCategoryAccent
+                        font.pixelSize: focus.theme.px(11)
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                }
+                Rectangle {
                     objectName: "focusOverdueBadge"
                     visible: focus.taskList.focusOverdue
                     implicitWidth: focusOverdueLabel.implicitWidth + 16

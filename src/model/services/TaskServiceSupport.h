@@ -387,7 +387,8 @@ struct ProtectedDependencyViolation final {
                 deadline,
                 draft.estimatedMinutes,
                 source.createdAtUtc(),
-                std::move(updatedAtUtc)};
+                std::move(updatedAtUtc),
+                draft.categoryId};
 }
 
 [[nodiscard]] Task makeTaskWithStatus(
@@ -406,7 +407,8 @@ struct ProtectedDependencyViolation final {
                 source.deadline(),
                 source.estimatedMinutes(),
                 source.createdAtUtc(),
-                std::move(updatedAtUtc)};
+                std::move(updatedAtUtc),
+                source.categoryId()};
 }
 
 [[nodiscard]] Task makeNewTask(const TaskId &taskId,
@@ -426,7 +428,8 @@ struct ProtectedDependencyViolation final {
                 deadline,
                 draft.estimatedMinutes,
                 nowUtc,
-                nowUtc};
+                nowUtc,
+                draft.categoryId};
 }
 
 } // namespace

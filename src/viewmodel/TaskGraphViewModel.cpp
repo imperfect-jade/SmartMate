@@ -2,7 +2,9 @@
 
 #include "TaskErrorMapper.h"
 #include "TaskPresentationFormatter.h"
+#include "TaskCategoryPresentation.h"
 #include "TaskGraphProjectionModels.h"
+#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
@@ -23,8 +25,25 @@ QString stableId(const model::TaskId &id)
 } // namespace
 
 TaskGraphViewModel::TaskGraphViewModel(model::TaskService &taskService, QObject *parent)
+    : TaskGraphViewModel(taskService, nullptr, parent)
+{
+}
+
+TaskGraphViewModel::TaskGraphViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService &categoryService,
+    QObject *parent)
+    : TaskGraphViewModel(taskService, &categoryService, parent)
+{
+}
+
+TaskGraphViewModel::TaskGraphViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService *categoryService,
+    QObject *parent)
     : QAbstractListModel(parent)
     , m_taskService(taskService)
+    , m_categoryService(categoryService)
     , m_edges(new TaskGraphEdgeListModel(this))
     , m_selectedPredecessors(new TaskGraphRelationListModel(this))
     , m_selectedSuccessors(new TaskGraphRelationListModel(this))
@@ -33,6 +52,14 @@ TaskGraphViewModel::TaskGraphViewModel(model::TaskService &taskService, QObject 
             this, &TaskGraphViewModel::reload);
     connect(&m_taskService, &model::TaskService::dependenciesChanged,
             this, &TaskGraphViewModel::reload);
+    if (m_categoryService) {
+        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
+                this, &TaskGraphViewModel::reloadCategories);
+        connect(m_categoryService,
+                &model::TaskCategoryService::taskCategoryAssignmentsChanged,
+                this, &TaskGraphViewModel::reload);
+    }
+    reloadCategories();
     reload();
 }
 
@@ -65,6 +92,16 @@ QVariant TaskGraphViewModel::data(const QModelIndex &index, const int role) cons
     case SelectedRole: return task.id() == m_selectedTaskId;
     case EmphasisLevelRole: return emphasisFor(task.id());
     case FilterMatchedRole: return filterMatches(projection);
+    case CategoryNameRole: {
+        const auto *category = categoryForTask(task);
+        return category ? category->name : QString{};
+    }
+    case CategoryAccentRole: {
+        const auto *category = categoryForTask(task);
+        return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+    }
+    case HasCategoryRole: return categoryForTask(task) != nullptr;
+    case CoreNodeRole: return projection.node.coreNode;
     default: return {};
     }
 }
@@ -79,7 +116,9 @@ QHash<int, QByteArray> TaskGraphViewModel::roleNames() const
             {CanEditDependenciesRole, "canEditDependencies"}, {NodeXRole, "nodeX"},
             {NodeYRole, "nodeY"}, {NodeWidthRole, "nodeWidth"},
             {NodeHeightRole, "nodeHeight"}, {SelectedRole, "selected"},
-            {EmphasisLevelRole, "emphasisLevel"}, {FilterMatchedRole, "filterMatched"}};
+            {EmphasisLevelRole, "emphasisLevel"}, {FilterMatchedRole, "filterMatched"},
+            {CategoryNameRole, "categoryName"}, {CategoryAccentRole, "categoryAccent"},
+            {HasCategoryRole, "hasCategory"}, {CoreNodeRole, "coreNode"}};
 }
 
 QAbstractItemModel *TaskGraphViewModel::edges() noexcept { return m_edges; }
@@ -89,6 +128,35 @@ qreal TaskGraphViewModel::contentWidth() const noexcept { return m_contentWidth;
 qreal TaskGraphViewModel::contentHeight() const noexcept { return m_contentHeight; }
 QString TaskGraphViewModel::searchText() const { return m_searchText; }
 int TaskGraphViewModel::statusFilterIndex() const noexcept { return m_statusFilterIndex; }
+QVariantList TaskGraphViewModel::categoryFilterOptions() const
+{
+    QVariantList options;
+    options.reserve(m_categories.size() + 2);
+    options.append(QVariantMap{{QStringLiteral("mode"), 0},
+                               {QStringLiteral("categoryId"), QString{}},
+                               {QStringLiteral("name"), QStringLiteral("全部类别")},
+                               {QStringLiteral("accent"), QStringLiteral("#64748b")}});
+    options.append(QVariantMap{{QStringLiteral("mode"), 1},
+                               {QStringLiteral("categoryId"), QString{}},
+                               {QStringLiteral("name"), QStringLiteral("未分类")},
+                               {QStringLiteral("accent"), QStringLiteral("#94a3b8")}});
+    for (const auto &category : m_categories) {
+        options.append(QVariantMap{
+            {QStringLiteral("mode"), 2},
+            {QStringLiteral("categoryId"), category.id.toString(QUuid::WithoutBraces)},
+            {QStringLiteral("name"), category.name},
+            {QStringLiteral("accent"), taskCategoryAccent(category.color)}});
+    }
+    return options;
+}
+int TaskGraphViewModel::categoryFilterMode() const noexcept
+{ return m_categoryFilterMode; }
+QString TaskGraphViewModel::categoryFilterCategoryId() const
+{
+    return m_categoryFilterMode == 2 && !m_categoryFilterCategoryId.isNull()
+        ? m_categoryFilterCategoryId.toString(QUuid::WithoutBraces)
+        : QString{};
+}
 int TaskGraphViewModel::taskCount() const noexcept { return static_cast<int>(m_nodes.size()); }
 int TaskGraphViewModel::blockedCount() const noexcept
 {
@@ -140,6 +208,28 @@ bool TaskGraphViewModel::canEditSelectedDependencies() const noexcept
     const auto *node = selectedNode();
     return node && node->node.availability.canEditDependencies;
 }
+QString TaskGraphViewModel::selectedCategoryName() const
+{
+    const auto *node = selectedNode();
+    const auto *category = node ? categoryForTask(node->node.task) : nullptr;
+    return category ? category->name : QString{};
+}
+QString TaskGraphViewModel::selectedCategoryAccent() const
+{
+    const auto *node = selectedNode();
+    const auto *category = node ? categoryForTask(node->node.task) : nullptr;
+    return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+}
+bool TaskGraphViewModel::selectedHasCategory() const noexcept
+{
+    const auto *node = selectedNode();
+    return node && categoryForTask(node->node.task) != nullptr;
+}
+bool TaskGraphViewModel::selectedCoreNode() const noexcept
+{
+    const auto *node = selectedNode();
+    return node && node->node.coreNode;
+}
 bool TaskGraphViewModel::empty() const noexcept { return m_nodes.isEmpty(); }
 QString TaskGraphViewModel::errorMessage() const { return m_errorMessage; }
 
@@ -162,10 +252,46 @@ void TaskGraphViewModel::setStatusFilterIndex(const int index)
 
 void TaskGraphViewModel::reload()
 {
-    const model::TaskGraphResult result = m_taskService.taskGraphSnapshot();
+    model::TaskGraphQuery query;
+    query.scope = static_cast<model::TaskGraphCategoryScope>(m_categoryFilterMode);
+    if (m_categoryFilterMode == 2) query.categoryId = m_categoryFilterCategoryId;
+    const model::TaskGraphResult result = m_taskService.taskGraphSnapshot(query);
     if (!result.ok()) { setErrorMessage(taskErrorMessage(result.error)); return; }
     setErrorMessage({});
     replaceGraph(result.value.value_or(model::TaskGraphSnapshot{}));
+}
+
+bool TaskGraphViewModel::setCategoryFilter(const int mode,
+                                           const QString &categoryId)
+{
+    if (mode < 0 || mode > 2) return false;
+    model::TaskCategoryId id;
+    if (mode == 2) {
+        id = QUuid::fromString(categoryId.trimmed());
+        const bool exists = std::any_of(
+            m_categories.cbegin(), m_categories.cend(),
+            [&id](const auto &category) { return category.id == id; });
+        if (id.isNull() || !exists) return false;
+    }
+    if (m_categoryFilterMode == mode
+        && (mode != 2 || m_categoryFilterCategoryId == id)) return true;
+
+    model::TaskGraphQuery query;
+    query.scope = static_cast<model::TaskGraphCategoryScope>(mode);
+    if (mode == 2) query.categoryId = id;
+    const model::TaskGraphResult result = m_taskService.taskGraphSnapshot(query);
+    if (!result.ok()) {
+        // 查询失败时保留旧筛选与旧画布，避免下拉框和图快照表达不同范围。
+        setErrorMessage(taskErrorMessage(result.error));
+        return false;
+    }
+
+    m_categoryFilterMode = mode;
+    m_categoryFilterCategoryId = mode == 2 ? id : model::TaskCategoryId{};
+    setErrorMessage({});
+    emit categoryFilterChanged();
+    replaceGraph(result.value.value_or(model::TaskGraphSnapshot{}));
+    return true;
 }
 
 bool TaskGraphViewModel::selectTask(const QString &taskId)
@@ -360,6 +486,47 @@ void TaskGraphViewModel::setErrorMessage(const QString &message)
     if (m_errorMessage == message) return;
     m_errorMessage = message;
     emit errorMessageChanged();
+}
+
+void TaskGraphViewModel::reloadCategories()
+{
+    QList<model::TaskCategory> categories;
+    if (m_categoryService) {
+        const auto result = m_categoryService->listCategories();
+        if (!result.ok()) {
+            setErrorMessage(QStringLiteral("类别数据访问失败，请稍后重试。"));
+            return;
+        }
+        categories = *result.value;
+    }
+    m_categories = std::move(categories);
+    emit categoryOptionsChanged();
+
+    if (m_categoryFilterMode == 2) {
+        const bool exists = std::any_of(
+            m_categories.cbegin(), m_categories.cend(),
+            [this](const auto &category) {
+                return category.id == m_categoryFilterCategoryId;
+            });
+        if (!exists) {
+            m_categoryFilterMode = 1;
+            m_categoryFilterCategoryId = model::TaskCategoryId{};
+            emit categoryFilterChanged();
+        }
+    }
+    reload();
+    emit selectionChanged();
+}
+
+const model::TaskCategory *TaskGraphViewModel::categoryForTask(
+    const model::Task &task) const
+{
+    if (!task.categoryId().has_value()) return nullptr;
+    const auto iterator = std::find_if(
+        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+            return category.id == *task.categoryId();
+        });
+    return iterator == m_categories.cend() ? nullptr : &*iterator;
 }
 
 } // namespace smartmate::viewmodel

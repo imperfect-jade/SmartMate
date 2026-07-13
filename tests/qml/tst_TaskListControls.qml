@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import SmartMate.View
+import SmartMate.ViewModel 1.0
 
 TestCase {
     id: testCase
@@ -80,6 +81,19 @@ TestCase {
         return null
     }
 
+    function categoryDelegate(categoryId) {
+        const listView = findChild(subject, "taskCategoryList")
+        if (listView === null)
+            return null
+        for (let row = 0; row < listView.count; ++row) {
+            listView.positionViewAtIndex(row, ListView.Contain)
+            const delegate = listView.itemAtIndex(row)
+            if (delegate !== null && delegate.categoryId === categoryId)
+                return delegate
+        }
+        return null
+    }
+
     function initTestCase() {
         verify(testAppViewModel !== null)
         alphaId = createTask("Alpha 架构设计", "Model planner 说明", 3)
@@ -107,6 +121,13 @@ TestCase {
     }
 
     function cleanup() {
+        const confirmation = findChild(subject,
+                                       "deleteCategoryConfirmationDialog")
+        if (confirmation !== null && confirmation.visible)
+            confirmation.reject()
+        const categoryDialog = findChild(subject, "taskCategoryDialog")
+        if (categoryDialog !== null && categoryDialog.visible)
+            categoryDialog.close()
         // 每个依赖用例都恢复三项任务的空关系，避免共享内存数据库污染其他测试。
         clearDependencies(alphaId)
         clearDependencies(betaId)
@@ -134,6 +155,67 @@ TestCase {
 
         tryCompare(testAppViewModel.taskList, "priorityFilterIndex", 4)
         compare(testAppViewModel.taskList.count, 1)
+    }
+
+    function test_categoryManagementAssignmentFilterAndDeletion() {
+        const manageButton = findChild(subject, "manageCategoriesButton")
+        verify(manageButton !== null)
+        manageButton.clicked()
+
+        const categoryDialog = findChild(subject, "taskCategoryDialog")
+        const nameField = findChild(subject, "categoryNameField")
+        const saveButton = findChild(subject, "saveCategoryButton")
+        verify(categoryDialog !== null)
+        verify(nameField !== null)
+        verify(saveButton !== null)
+        tryCompare(categoryDialog, "opened", true)
+
+        nameField.text = "学习"
+        nameField.textEdited()
+        saveButton.clicked()
+        tryCompare(testAppViewModel.taskCategories, "count", 1)
+        const categoryId = testAppViewModel.taskCategories.editingCategoryId
+        verify(categoryId.length > 0)
+        categoryDialog.close()
+
+        const editor = testAppViewModel.taskEditor
+        verify(editor.beginEdit(alphaId), editor.errorMessage)
+        editor.selectedCategoryId = categoryId
+        verify(editor.save(), editor.errorMessage)
+        tryVerify(function() { return taskDelegate(alphaId) !== null })
+        const categoryBadge = findChild(taskDelegate(alphaId),
+                                        "taskCategoryBadge_" + alphaId)
+        verify(categoryBadge !== null)
+        tryCompare(categoryBadge, "visible", true)
+
+        const categoryFilter = findChild(subject, "categoryFilterComboBox")
+        verify(categoryFilter !== null)
+        categoryFilter.activated(2)
+        tryCompare(testAppViewModel.taskList, "categoryFilterMode", 2)
+        compare(testAppViewModel.taskList.categoryFilterCategoryId, categoryId)
+        compare(testAppViewModel.taskList.count, 1)
+
+        manageButton.clicked()
+        tryCompare(categoryDialog, "opened", true)
+        tryVerify(function() { return categoryDelegate(categoryId) !== null })
+        const deleteButton = findChild(categoryDelegate(categoryId),
+                                       "deleteCategory_" + categoryId)
+        verify(deleteButton !== null)
+        deleteButton.clicked()
+        const confirmation = findChild(subject,
+                                       "deleteCategoryConfirmationDialog")
+        verify(confirmation !== null)
+        tryCompare(confirmation, "opened", true)
+        confirmation.reject()
+        compare(testAppViewModel.taskCategories.count, 1)
+
+        deleteButton.clicked()
+        tryCompare(confirmation, "opened", true)
+        confirmation.accept()
+        tryCompare(testAppViewModel.taskCategories, "count", 0)
+        tryCompare(testAppViewModel.taskList, "categoryFilterMode", 1)
+        compare(testAppViewModel.taskList.count, 3)
+        categoryDialog.close()
     }
 
     function test_clearButtonClearsBothConditions() {
@@ -489,8 +571,11 @@ TestCase {
         tryCompare(firstCheck, "enabled", true)
         tryCompare(secondCheck, "enabled", true)
         tryCompare(todoCheck, "enabled", false)
-        firstCheck.clicked()
-        secondCheck.clicked()
+        // ListView会复用离屏delegate；每次点击前按稳定TaskId重新取得当前实例。
+        findChild(taskDelegate(firstId),
+                  "bulkTaskCheckBox_" + firstId).clicked()
+        findChild(taskDelegate(secondId),
+                  "bulkTaskCheckBox_" + secondId).clicked()
         tryCompare(testAppViewModel.taskList, "bulkSelectedCount", 2)
         const selectedLabel = findChild(subject, "bulkSelectedCountLabel")
         verify(selectedLabel !== null)

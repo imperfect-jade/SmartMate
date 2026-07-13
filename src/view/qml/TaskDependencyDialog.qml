@@ -72,9 +72,12 @@ Dialog {
                     required property bool selected
                     required property bool archived
                     required property bool selectable
+                    required property string categoryName
+                    required property string categoryAccent
+                    required property bool hasCategory
 
                     width: ListView.view.width
-                    height: root.theme.px(64)
+                    height: root.theme.px(72)
                     radius: 6
                     color: candidateDelegate.selected ? root.theme.primarySoft : root.theme.surfaceElevated
                     border.color: candidateDelegate.selected ? root.theme.primary : root.theme.borderSoft
@@ -110,6 +113,14 @@ Dialog {
                                 text: qsTr("ID %1").arg(candidateDelegate.shortId)
                                 color: root.theme.textMuted
                                 font.pixelSize: 11
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: candidateDelegate.hasCategory
+                                text: qsTr("类别：%1").arg(candidateDelegate.categoryName)
+                                color: candidateDelegate.categoryAccent
+                                font.pixelSize: root.theme.px(11)
+                                elide: Text.ElideRight
                             }
                         }
 

@@ -2,6 +2,8 @@
 
 #include "TaskErrorMapper.h"
 #include "TaskPresentationFormatter.h"
+#include "TaskCategoryPresentation.h"
+#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QUuid>
@@ -12,9 +14,31 @@ namespace smartmate::viewmodel {
 
 TaskDependencyViewModel::TaskDependencyViewModel(model::TaskService &taskService,
                                                  QObject *parent)
+    : TaskDependencyViewModel(taskService, nullptr, parent)
+{
+}
+
+TaskDependencyViewModel::TaskDependencyViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService &categoryService,
+    QObject *parent)
+    : TaskDependencyViewModel(taskService, &categoryService, parent)
+{
+}
+
+TaskDependencyViewModel::TaskDependencyViewModel(
+    model::TaskService &taskService,
+    model::TaskCategoryService *categoryService,
+    QObject *parent)
     : QAbstractListModel(parent)
     , m_taskService(taskService)
+    , m_categoryService(categoryService)
 {
+    if (m_categoryService) {
+        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
+                this, &TaskDependencyViewModel::reloadCategories);
+    }
+    reloadCategories();
 }
 
 int TaskDependencyViewModel::rowCount(const QModelIndex &parent) const
@@ -47,6 +71,16 @@ QVariant TaskDependencyViewModel::data(const QModelIndex &index, const int role)
         return task.status() == model::TaskStatus::Archived;
     case SelectableRole:
         return m_selectablePredecessors.contains(task.id());
+    case CategoryNameRole: {
+        const auto *category = categoryForTask(task);
+        return category ? category->name : QString{};
+    }
+    case CategoryAccentRole: {
+        const auto *category = categoryForTask(task);
+        return category ? taskCategoryAccent(category->color) : QStringLiteral("#94a3b8");
+    }
+    case HasCategoryRole:
+        return categoryForTask(task) != nullptr;
     default:
         return {};
     }
@@ -63,6 +97,9 @@ QHash<int, QByteArray> TaskDependencyViewModel::roleNames() const
         {SelectedRole, "selected"},
         {ArchivedRole, "archived"},
         {SelectableRole, "selectable"},
+        {CategoryNameRole, "categoryName"},
+        {CategoryAccentRole, "categoryAccent"},
+        {HasCategoryRole, "hasCategory"},
     };
 }
 
@@ -306,6 +343,29 @@ void TaskDependencyViewModel::setErrorMessage(const QString &message)
     }
     m_errorMessage = message;
     emit errorMessageChanged();
+}
+
+void TaskDependencyViewModel::reloadCategories()
+{
+    if (!m_categoryService) return;
+    const auto result = m_categoryService->listCategories();
+    if (!result.ok()) return;
+    m_categories = *result.value;
+    if (!m_candidates.isEmpty()) {
+        emit dataChanged(index(0), index(m_candidates.size() - 1),
+                         {CategoryNameRole, CategoryAccentRole, HasCategoryRole});
+    }
+}
+
+const model::TaskCategory *TaskDependencyViewModel::categoryForTask(
+    const model::Task &task) const
+{
+    if (!task.categoryId().has_value()) return nullptr;
+    const auto iterator = std::find_if(
+        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+            return category.id == *task.categoryId();
+        });
+    return iterator == m_categories.cend() ? nullptr : &*iterator;
 }
 
 } // namespace smartmate::viewmodel

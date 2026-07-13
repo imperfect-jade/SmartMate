@@ -3,6 +3,7 @@
 #include "fakes/FakeTaskDependencyRepository.h"
 #include "fakes/FakeTaskDeletionRepository.h"
 #include "fakes/FakeTaskRepository.h"
+#include "fakes/FakeTaskCategoryRepository.h"
 
 #include "domain/Task.h"
 #include "services/TaskService.h"
@@ -29,6 +30,7 @@ using smartmate::tests::FakeTaskBatchTransitionRepository;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::tests::FakeTaskDeletionRepository;
 using smartmate::tests::FakeTaskRepository;
+using smartmate::tests::FakeTaskCategoryRepository;
 
 namespace {
 
@@ -68,8 +70,10 @@ struct ServiceFixture final {
         , creationRepository(repository, dependencyRepository)
         , batchTransitionRepository(repository)
         , deletionRepository(repository, dependencyRepository)
+        , categoryRepository()
         , service(repository, dependencyRepository, creationRepository,
-                  batchTransitionRepository, deletionRepository)
+                  batchTransitionRepository, deletionRepository,
+                  categoryRepository)
         , taskChanged(&service, &TaskService::tasksChanged)
         , dependencyChanged(&service, &TaskService::dependenciesChanged)
     {
@@ -80,6 +84,7 @@ struct ServiceFixture final {
     FakeTaskCreationRepository creationRepository;
     FakeTaskBatchTransitionRepository batchTransitionRepository;
     FakeTaskDeletionRepository deletionRepository;
+    FakeTaskCategoryRepository categoryRepository;
     TaskService service;
     QSignalSpy taskChanged;
     QSignalSpy dependencyChanged;

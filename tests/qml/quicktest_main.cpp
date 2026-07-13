@@ -1,5 +1,6 @@
 #include "AppViewModel.h"
 #include "persistence/SqliteTaskRepository.h"
+#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QQmlContext>
@@ -21,9 +22,12 @@ public slots:
             QStringLiteral(":memory:"));
         m_service = std::make_unique<smartmate::model::TaskService>(
             *m_repository, *m_repository, *m_repository, *m_repository,
+            *m_repository,
             *m_repository);
-        m_appViewModel =
-            std::make_unique<smartmate::viewmodel::AppViewModel>(*m_service);
+        m_categoryService =
+            std::make_unique<smartmate::model::TaskCategoryService>(*m_repository);
+        m_appViewModel = std::make_unique<smartmate::viewmodel::AppViewModel>(
+            *m_service, *m_categoryService);
     }
 
     void qmlEngineAvailable(QQmlEngine *engine)
@@ -35,6 +39,8 @@ public slots:
                                        QQmlEngine::CppOwnership);
         QQmlEngine::setObjectOwnership(m_appViewModel->taskGraph(),
                                        QQmlEngine::CppOwnership);
+        QQmlEngine::setObjectOwnership(m_appViewModel->taskCategories(),
+                                       QQmlEngine::CppOwnership);
         QQmlEngine::setObjectOwnership(m_appViewModel->appearanceSettings(),
                                        QQmlEngine::CppOwnership);
         engine->rootContext()->setContextProperty(
@@ -45,6 +51,7 @@ public slots:
     {
         // 按依赖反序释放，确保 Qt SQL 连接在应用对象仍存在时关闭。
         m_appViewModel.reset();
+        m_categoryService.reset();
         m_service.reset();
         m_repository.reset();
     }
@@ -52,6 +59,7 @@ public slots:
 private:
     std::unique_ptr<smartmate::model::persistence::SqliteTaskRepository> m_repository;
     std::unique_ptr<smartmate::model::TaskService> m_service;
+    std::unique_ptr<smartmate::model::TaskCategoryService> m_categoryService;
     std::unique_ptr<smartmate::viewmodel::AppViewModel> m_appViewModel;
 };
 

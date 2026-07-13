@@ -10,6 +10,7 @@ Rectangle {
     required property TaskListViewModel taskList
     required property var theme
     signal newTaskRequested()
+    signal manageCategoriesRequested()
     signal bulkArchiveRequested()
     signal bulkRestoreRequested()
     signal bulkDeleteRequested()
@@ -51,19 +52,6 @@ Rectangle {
                 selectByMouse: true
                 onTextEdited: bar.taskList.searchText = text
             }
-            ComboBox {
-                objectName: "priorityFilterComboBox"
-                Layout.preferredWidth: bar.theme.px(145)
-                model: bar.taskList.priorityFilterOptions
-                currentIndex: bar.taskList.priorityFilterIndex
-                onActivated: index => bar.taskList.priorityFilterIndex = index
-            }
-            Button {
-                objectName: "clearFiltersButton"
-                text: qsTr("清除")
-                visible: bar.taskList.hasActiveFilters
-                onClicked: bar.taskList.clearFilters()
-            }
             Item { Layout.fillWidth: true }
             Label {
                 text: qsTr("%1 项").arg(bar.taskList.count)
@@ -82,6 +70,48 @@ Rectangle {
                 text: qsTr("＋ 新建任务")
                 onClicked: bar.newTaskRequested()
             }
+        }
+
+        // 类别选项由ViewModel提供稳定ID；下拉行号只用于取得当前选项，不作为类别身份。
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: bar.theme.px(8)
+            Label { text: qsTr("筛选"); color: bar.theme.textMuted }
+            ComboBox {
+                objectName: "priorityFilterComboBox"
+                Layout.preferredWidth: bar.theme.px(145)
+                model: bar.taskList.priorityFilterOptions
+                currentIndex: bar.taskList.priorityFilterIndex
+                onActivated: index => bar.taskList.priorityFilterIndex = index
+            }
+            ComboBox {
+                id: categoryFilter
+                objectName: "categoryFilterComboBox"
+                Layout.preferredWidth: bar.theme.px(180)
+                model: bar.taskList.categoryFilterOptions
+                textRole: "name"
+                valueRole: "categoryId"
+                currentIndex: bar.taskList.categoryFilterMode === 0 ? 0
+                              : bar.taskList.categoryFilterMode === 1 ? 1
+                              : categoryFilter.indexOfValue(
+                                    bar.taskList.categoryFilterCategoryId)
+                onActivated: index => {
+                    const option = bar.taskList.categoryFilterOptions[index]
+                    bar.taskList.setCategoryFilter(option.mode, option.categoryId)
+                }
+            }
+            Button {
+                objectName: "manageCategoriesButton"
+                text: qsTr("管理类别")
+                onClicked: bar.manageCategoriesRequested()
+            }
+            Button {
+                objectName: "clearFiltersButton"
+                text: qsTr("清除条件")
+                visible: bar.taskList.hasActiveFilters
+                onClicked: bar.taskList.clearFilters()
+            }
+            Item { Layout.fillWidth: true }
         }
 
         RowLayout {

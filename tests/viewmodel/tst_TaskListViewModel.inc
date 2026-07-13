@@ -20,7 +20,8 @@ void TaskViewModelsTest::listProjectsActiveAndArchivedTasksInPlanOrder()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.count(), 3);
@@ -86,7 +87,8 @@ void TaskViewModelsTest::listMapsEveryRecommendedOrderReason()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(reasonForId(viewModel, inProgress.id().toString(QUuid::WithoutBraces)),
@@ -134,7 +136,8 @@ void TaskViewModelsTest::listSearchesTrimmedKeywordsInTitleAndDescription()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.setSearchText(QStringLiteral("  report  "));
@@ -181,7 +184,8 @@ void TaskViewModelsTest::listCombinesPrioritySearchAndArchiveFilters()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.priorityFilterOptions(),
@@ -217,7 +221,8 @@ void TaskViewModelsTest::listFilterPropertiesNotifyOnceAndRejectInvalidIndexes()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy searchSpy{&viewModel, &TaskListViewModel::searchTextChanged};
     QSignalSpy prioritySpy{&viewModel,
@@ -269,7 +274,8 @@ void TaskViewModelsTest::listRetainsFiltersAndStableTaskIdAcrossServiceReloads()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.setSearchText(QStringLiteral("needle"));
@@ -306,7 +312,8 @@ void TaskViewModelsTest::listSchedulesMinuteRefreshForTimeSensitiveReasons()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     const auto timers = viewModel.findChildren<QTimer *>(
@@ -356,7 +363,8 @@ void TaskViewModelsTest::listProjectsOverdueStateIndependentlyFromOrderReason()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     const auto overdueFor = [&viewModel](const Task &stored) {
@@ -400,7 +408,8 @@ void TaskViewModelsTest::listProjectsAndExecutesStateActionsByStableTaskId()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     const QString stableId = idAt(viewModel, 0);
@@ -489,7 +498,8 @@ void TaskViewModelsTest::onlyTodoTasksCanOpenEditor()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel list{service};
     TaskEditorViewModel editor{service};
     const auto canEdit = [&list](const Task &stored) {
@@ -539,7 +549,8 @@ void TaskViewModelsTest::listProjectsAndForwardsPermanentDeletionByStableTaskId(
     FakeTaskDeletionRepository localDeletionRepository{repository,
                                                         dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), localDeletionRepository};
+                        batchTransitionsFor(repository), localDeletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     const int todoRow = rowForId(
@@ -587,7 +598,8 @@ void TaskViewModelsTest::listMaintainsBulkSelectionByStableIdAndResetsAtDisplayB
     FakeTaskDeletionRepository localDeletionRepository{repository,
                                                         dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchRepository, localDeletionRepository};
+                        batchRepository, localDeletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy bulkSpy{&viewModel, &TaskListViewModel::bulkSelectionChanged};
 
@@ -651,7 +663,8 @@ void TaskViewModelsTest::listExecutesAtomicBulkCommandsAndPreservesFailedSelecti
     FakeTaskDeletionRepository localDeletionRepository{repository,
                                                         dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchRepository, localDeletionRepository};
+                        batchRepository, localDeletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy tasksSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependenciesSpy{&service, &TaskService::dependenciesChanged};
@@ -722,7 +735,8 @@ void TaskViewModelsTest::listMapsBatchConflictIdsToTaskTitles()
     FakeTaskDeletionRepository localDeletionRepository{repository,
                                                         dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchRepository, localDeletionRepository};
+                        batchRepository, localDeletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     viewModel.beginBulkSelection();
@@ -743,7 +757,8 @@ void TaskViewModelsTest::listExposesAndClearsChineseErrors()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
     QSignalSpy errorSpy{&viewModel, &TaskListViewModel::errorOccurred};
 
@@ -776,7 +791,8 @@ void TaskViewModelsTest::listProjectsBlockingAndUnlockInformation()
     }};
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     const int predecessorRow = rowForId(
@@ -826,7 +842,8 @@ void TaskViewModelsTest::listFocusProjectionIgnoresFiltersAndTracksInProgress()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     QCOMPARE(viewModel.focusState(), TaskListViewModel::FocusState::Suggested);
@@ -858,7 +875,8 @@ void TaskViewModelsTest::listSelectsStableTaskDetails()
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
     TaskService service{repository, dependencyRepository, creationRepository,
-                        batchTransitionsFor(repository), deletionRepository};
+                        batchTransitionsFor(repository), deletionRepository,
+                        categoryRepository};
     TaskListViewModel viewModel{service};
 
     QVERIFY(viewModel.selectTask(stored.id().toString(QUuid::WithoutBraces)));

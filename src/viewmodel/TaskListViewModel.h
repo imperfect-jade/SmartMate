@@ -9,10 +9,12 @@
 #include <QSet>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 namespace smartmate::model {
 class TaskService;
+class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -26,6 +28,11 @@ class TaskListViewModel final : public QAbstractListModel {
     Q_PROPERTY(int priorityFilterIndex READ priorityFilterIndex WRITE setPriorityFilterIndex
                    NOTIFY priorityFilterIndexChanged)
     Q_PROPERTY(QStringList priorityFilterOptions READ priorityFilterOptions CONSTANT)
+    Q_PROPERTY(QVariantList categoryFilterOptions READ categoryFilterOptions
+                   NOTIFY categoryOptionsChanged)
+    Q_PROPERTY(int categoryFilterMode READ categoryFilterMode NOTIFY categoryFilterChanged)
+    Q_PROPERTY(QString categoryFilterCategoryId READ categoryFilterCategoryId
+                   NOTIFY categoryFilterChanged)
     Q_PROPERTY(bool hasActiveFilters READ hasActiveFilters NOTIFY hasActiveFiltersChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(bool bulkSelectionMode READ bulkSelectionMode NOTIFY bulkSelectionChanged)
@@ -49,6 +56,9 @@ class TaskListViewModel final : public QAbstractListModel {
     Q_PROPERTY(bool focusOverdue READ focusOverdue NOTIFY focusTaskChanged)
     Q_PROPERTY(bool focusCanStart READ focusCanStart NOTIFY focusTaskChanged)
     Q_PROPERTY(bool focusCanComplete READ focusCanComplete NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusCategoryName READ focusCategoryName NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusCategoryAccent READ focusCategoryAccent NOTIFY focusTaskChanged)
+    Q_PROPERTY(bool focusHasCategory READ focusHasCategory NOTIFY focusTaskChanged)
     Q_PROPERTY(QString selectedTaskId READ selectedTaskId NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedTitle READ selectedTitle NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedDescription READ selectedDescription NOTIFY selectionChanged)
@@ -66,6 +76,9 @@ class TaskListViewModel final : public QAbstractListModel {
     Q_PROPERTY(bool selectedCanEditTask READ selectedCanEditTask NOTIFY selectionChanged)
     Q_PROPERTY(bool selectedCanEditDependencies READ selectedCanEditDependencies
                    NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedCategoryName READ selectedCategoryName NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedCategoryAccent READ selectedCategoryAccent NOTIFY selectionChanged)
+    Q_PROPERTY(bool selectedHasCategory READ selectedHasCategory NOTIFY selectionChanged)
     QML_NAMED_ELEMENT(TaskListViewModel)
     QML_UNCREATABLE("TaskListViewModel is owned by AppViewModel")
 
@@ -107,10 +120,17 @@ public:
         CanDeletePermanentlyRole,
         BulkSelectedRole,
         BulkSelectableRole,
+        CategoryIdRole,
+        CategoryNameRole,
+        CategoryAccentRole,
+        HasCategoryRole,
     };
     Q_ENUM(Role)
 
     explicit TaskListViewModel(model::TaskService &taskService, QObject *parent = nullptr);
+    TaskListViewModel(model::TaskService &taskService,
+                      model::TaskCategoryService &categoryService,
+                      QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
     [[nodiscard]] int count() const noexcept;
@@ -121,6 +141,9 @@ public:
     [[nodiscard]] QString searchText() const;
     [[nodiscard]] int priorityFilterIndex() const noexcept;
     [[nodiscard]] QStringList priorityFilterOptions() const;
+    [[nodiscard]] QVariantList categoryFilterOptions() const;
+    [[nodiscard]] int categoryFilterMode() const noexcept;
+    [[nodiscard]] QString categoryFilterCategoryId() const;
     [[nodiscard]] bool hasActiveFilters() const;
     [[nodiscard]] bool bulkSelectionMode() const noexcept;
     [[nodiscard]] int bulkSelectedCount() const noexcept;
@@ -142,6 +165,9 @@ public:
     [[nodiscard]] bool focusOverdue() const noexcept;
     [[nodiscard]] bool focusCanStart() const noexcept;
     [[nodiscard]] bool focusCanComplete() const noexcept;
+    [[nodiscard]] QString focusCategoryName() const;
+    [[nodiscard]] QString focusCategoryAccent() const;
+    [[nodiscard]] bool focusHasCategory() const noexcept;
     [[nodiscard]] QString selectedTaskId() const;
     [[nodiscard]] QString selectedTitle() const;
     [[nodiscard]] QString selectedDescription() const;
@@ -157,9 +183,14 @@ public:
     [[nodiscard]] int selectedUnlockCount() const noexcept;
     [[nodiscard]] bool selectedCanEditTask() const noexcept;
     [[nodiscard]] bool selectedCanEditDependencies() const noexcept;
+    [[nodiscard]] QString selectedCategoryName() const;
+    [[nodiscard]] QString selectedCategoryAccent() const;
+    [[nodiscard]] bool selectedHasCategory() const noexcept;
     void setShowArchived(bool showArchived);
     void setSearchText(const QString &searchText);
     void setPriorityFilterIndex(int priorityFilterIndex);
+    /// mode: 0=全部，1=未分类，2=指定类别；指定类别始终使用稳定CategoryId。
+    Q_INVOKABLE bool setCategoryFilter(int mode, const QString &categoryId = {});
 
     /// 从Service重新获取快照并重建当前展示投影。
     Q_INVOKABLE void reload();
@@ -203,6 +234,8 @@ signals:
     void showArchivedChanged();
     void searchTextChanged();
     void priorityFilterIndexChanged();
+    void categoryOptionsChanged();
+    void categoryFilterChanged();
     void hasActiveFiltersChanged();
     void countChanged();
     void bulkSelectionChanged();
@@ -239,9 +272,17 @@ private:
     bool performTransition(const QString &taskId, model::TaskTransition transition);
     void rebuildVisibleTasks();
     void setError(const QString &message);
+    void reloadCategories();
+    [[nodiscard]] const model::TaskCategory *categoryForTask(
+        const model::Task *task) const;
+
+    TaskListViewModel(model::TaskService &taskService,
+                      model::TaskCategoryService *categoryService,
+                      QObject *parent);
 
     // Service 由组合根拥有；列表只保留非拥有引用并监听其变化通知。
     model::TaskService &m_taskService;
+    model::TaskCategoryService *m_categoryService{nullptr};
     // 每分钟重新请求Model计划，使“已逾期”等随时间变化的推荐理由及时刷新。
     QTimer m_reloadTimer;
     // 全量计划顺序与当前可见投影分离，搜索和筛选不会修改领域数据。
@@ -264,6 +305,10 @@ private:
     QString m_searchText;
     // 0表示全部，1～4分别映射Low～Urgent；非法索引不会替换当前条件。
     int m_priorityFilterIndex{0};
+    QList<model::TaskCategory> m_categories;
+    /// 0=全部、1=未分类、2=指定类别；筛选状态只存在于当前会话。
+    int m_categoryFilterMode{0};
+    model::TaskCategoryId m_categoryFilterCategoryId;
     QString m_errorMessage;
 };
 

@@ -8,12 +8,14 @@
 #include <QSet>
 #include <QStringList>
 #include <QTimeZone>
+#include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <optional>
 
 namespace smartmate::model {
 class TaskService;
+class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -46,6 +48,12 @@ class TaskEditorViewModel final : public QAbstractListModel {
     Q_PROPERTY(int minimumEstimatedMinutes READ minimumEstimatedMinutes CONSTANT)
     Q_PROPERTY(int maximumEstimatedMinutes READ maximumEstimatedMinutes CONSTANT)
     Q_PROPERTY(QStringList priorityOptions READ priorityOptions CONSTANT)
+    Q_PROPERTY(QVariantList categoryOptions READ categoryOptions NOTIFY categoryOptionsChanged)
+    Q_PROPERTY(QString selectedCategoryId READ selectedCategoryId WRITE setSelectedCategoryId
+                   NOTIFY categoryChanged)
+    Q_PROPERTY(QString selectedCategoryName READ selectedCategoryName NOTIFY categoryChanged)
+    Q_PROPERTY(QString selectedCategoryAccent READ selectedCategoryAccent NOTIFY categoryChanged)
+    Q_PROPERTY(bool hasCategory READ hasCategory NOTIFY categoryChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY formStateChanged)
     Q_PROPERTY(bool canSave READ canSave NOTIFY formStateChanged)
     Q_PROPERTY(QString validationMessage READ validationMessage NOTIFY formStateChanged)
@@ -69,13 +77,23 @@ public:
         CandidateTitleRole,
         CandidateStatusTextRole,
         CandidatePriorityTextRole,
+        CandidateCategoryNameRole,
+        CandidateCategoryAccentRole,
+        CandidateHasCategoryRole,
         CandidateSelectedRole,
     };
     Q_ENUM(Role)
 
     explicit TaskEditorViewModel(model::TaskService &taskService, QObject *parent = nullptr);
+    TaskEditorViewModel(model::TaskService &taskService,
+                        model::TaskCategoryService &categoryService,
+                        QObject *parent = nullptr);
     /// 注入时区供测试和确定性显示使用；生产环境默认使用系统时区。
     TaskEditorViewModel(model::TaskService &taskService,
+                        QTimeZone timeZone,
+                        QObject *parent = nullptr);
+    TaskEditorViewModel(model::TaskService &taskService,
+                        model::TaskCategoryService &categoryService,
                         QTimeZone timeZone,
                         QObject *parent = nullptr);
 
@@ -109,6 +127,12 @@ public:
     [[nodiscard]] int maximumEstimatedMinutes() const noexcept;
 
     [[nodiscard]] QStringList priorityOptions() const;
+    [[nodiscard]] QVariantList categoryOptions() const;
+    [[nodiscard]] QString selectedCategoryId() const;
+    void setSelectedCategoryId(const QString &categoryId);
+    [[nodiscard]] QString selectedCategoryName() const;
+    [[nodiscard]] QString selectedCategoryAccent() const;
+    [[nodiscard]] bool hasCategory() const noexcept;
     [[nodiscard]] bool dirty() const noexcept;
     [[nodiscard]] bool canSave() const noexcept;
     [[nodiscard]] QString validationMessage() const;
@@ -156,6 +180,8 @@ signals:
     void errorMessageChanged();
     void predecessorCandidatesChanged();
     void predecessorSelectionChanged();
+    void categoryOptionsChanged();
+    void categoryChanged();
     void saved(const QString &taskId);
     void cancelled();
 
@@ -167,6 +193,7 @@ private:
         int priorityIndex{1};
         std::optional<QDateTime> deadline;
         std::optional<int> estimatedMinutes;
+        std::optional<model::TaskCategoryId> categoryId;
         QSet<model::TaskId> predecessorIds;
 
         bool operator==(const Snapshot &) const = default;
@@ -187,9 +214,18 @@ private:
     [[nodiscard]] int candidateRow(const model::TaskId &taskId) const;
     [[nodiscard]] static QString statusText(model::TaskStatus status);
     [[nodiscard]] static QString priorityText(model::TaskPriority priority);
+    void reloadCategories();
+    [[nodiscard]] const model::TaskCategory *selectedCategory() const;
+
+    TaskEditorViewModel(model::TaskService &taskService,
+                        model::TaskCategoryService *categoryService,
+                        QTimeZone timeZone,
+                        QObject *parent);
 
     // 非拥有的应用服务引用。
     model::TaskService &m_taskService;
+    /// 非拥有指针；生产组合根注入，nullptr仅供旧隔离测试维持无类别模式。
+    model::TaskCategoryService *m_categoryService{nullptr};
     // 当前可编辑草稿采用表单友好形态，便于与 QML 双向绑定。
     QString m_taskId;
     bool m_editMode{false};
@@ -202,6 +238,8 @@ private:
     std::optional<QDateTime> m_deadline;
     /// Model 使用的总分钟数，界面仅将其投影为天、小时和分钟。
     std::optional<int> m_estimatedMinutes;
+    std::optional<model::TaskCategoryId> m_categoryId;
+    QList<model::TaskCategory> m_categories;
     /// 解释日历和时钟选择的时区，生产环境为系统时区。
     QTimeZone m_timeZone;
     // 原始快照和由草稿推导出的界面状态。

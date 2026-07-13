@@ -13,7 +13,8 @@ Task::Task(TaskId id,
            std::optional<QDateTime> deadline,
            std::optional<int> estimatedMinutes,
            QDateTime createdAtUtc,
-           QDateTime updatedAtUtc)
+           QDateTime updatedAtUtc,
+           std::optional<TaskCategoryId> categoryId)
     : m_id(std::move(id))
     , m_title(std::move(title))
     , m_description(std::move(description))
@@ -22,6 +23,7 @@ Task::Task(TaskId id,
     , m_statusBeforeArchive(std::move(statusBeforeArchive))
     , m_deadline(std::move(deadline))
     , m_estimatedMinutes(std::move(estimatedMinutes))
+    , m_categoryId(std::move(categoryId))
     , m_createdAtUtc(std::move(createdAtUtc))
     , m_updatedAtUtc(std::move(updatedAtUtc))
 {
@@ -80,6 +82,11 @@ const std::optional<QDateTime> &Task::deadline() const noexcept
 const std::optional<int> &Task::estimatedMinutes() const noexcept
 {
     return m_estimatedMinutes;
+}
+
+const std::optional<TaskCategoryId> &Task::categoryId() const noexcept
+{
+    return m_categoryId;
 }
 
 const QDateTime &Task::createdAtUtc() const noexcept

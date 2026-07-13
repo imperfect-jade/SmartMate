@@ -21,6 +21,7 @@ TaskService::TaskService(ITaskRepository &repository,
                          ITaskCreationRepository &creationRepository,
                          ITaskBatchTransitionRepository &batchTransitionRepository,
                          ITaskDeletionRepository &deletionRepository,
+                         ITaskCategoryRepository &categoryRepository,
                          QObject *parent)
     : QObject(parent)
     , m_repository(repository)
@@ -28,6 +29,7 @@ TaskService::TaskService(ITaskRepository &repository,
     , m_creationRepository(creationRepository)
     , m_batchTransitionRepository(batchTransitionRepository)
     , m_deletionRepository(deletionRepository)
+    , m_categoryRepository(categoryRepository)
 {
 }
 
@@ -184,7 +186,21 @@ TaskDependencyEditContextResult TaskService::taskDependencyEditContext(
 
 TaskGraphResult TaskService::taskGraphSnapshot() const
 {
+    return taskGraphSnapshot({});
+}
+
+TaskGraphResult TaskService::taskGraphSnapshot(const TaskGraphQuery &query) const
+{
     try {
+        if (query.scope == TaskGraphCategoryScope::SpecificCategory) {
+            if (!query.categoryId.has_value()
+                || !m_categoryRepository.findCategoryById(*query.categoryId)
+                        .has_value()) {
+                return TaskGraphResult::failure(
+                    TaskError::TaskCategoryNotFound,
+                    QStringLiteral("Task graph category was not found."));
+            }
+        }
         const QList<Task> tasks = m_repository.findAll();
         const QList<TaskDependency> dependencies =
             m_dependencyRepository.findAllDependencies();
@@ -210,8 +226,58 @@ TaskGraphResult TaskService::taskGraphSnapshot() const
             }
         }
         const QList<TaskId> connectedIds = graph.connectedTaskIds(activeTaskIds);
-        const QSet<TaskId> visibleIds(connectedIds.cbegin(), connectedIds.cend());
-        const QHash<TaskId, int> levels = graph.dependencyLevels();
+        const QSet<TaskId> baseVisibleIds(connectedIds.cbegin(), connectedIds.cend());
+
+        QSet<TaskId> coreIds;
+        for (const Task &task : tasks) {
+            if (!baseVisibleIds.contains(task.id())) {
+                continue;
+            }
+            const bool matches = query.scope == TaskGraphCategoryScope::All
+                || (query.scope == TaskGraphCategoryScope::Uncategorized
+                    && !task.categoryId().has_value())
+                || (query.scope == TaskGraphCategoryScope::SpecificCategory
+                    && task.categoryId() == query.categoryId);
+            if (matches) {
+                coreIds.insert(task.id());
+            }
+        }
+
+        QSet<TaskId> visibleIds = coreIds;
+        if (query.scope != TaskGraphCategoryScope::All) {
+            // 只补充一跳上下文，避免跨类别关系把整个连通分量重新展开。
+            for (const TaskDependency &dependency : dependencies) {
+                if (coreIds.contains(dependency.predecessorId)
+                    && baseVisibleIds.contains(dependency.successorId)) {
+                    visibleIds.insert(dependency.successorId);
+                }
+                if (coreIds.contains(dependency.successorId)
+                    && baseVisibleIds.contains(dependency.predecessorId)) {
+                    visibleIds.insert(dependency.predecessorId);
+                }
+            }
+        }
+
+        QList<TaskDependency> visibleDependencies;
+        for (const TaskDependency &dependency : dependencies) {
+            const bool endpointsVisible = visibleIds.contains(dependency.predecessorId)
+                && visibleIds.contains(dependency.successorId);
+            const bool touchesCore = coreIds.contains(dependency.predecessorId)
+                || coreIds.contains(dependency.successorId);
+            if (endpointsVisible
+                && (query.scope == TaskGraphCategoryScope::All || touchesCore)) {
+                visibleDependencies.append(dependency);
+            }
+        }
+        QList<Task> visibleTasks;
+        visibleTasks.reserve(visibleIds.size());
+        for (const Task &task : tasks) {
+            if (visibleIds.contains(task.id())) {
+                visibleTasks.append(task);
+            }
+        }
+        const QHash<TaskId, int> levels =
+            TaskDependencyGraph{visibleTasks, visibleDependencies}.dependencyLevels();
 
         TaskGraphSnapshot snapshot;
         const QList<PlannedTask> recommended = orderTasks(
@@ -227,16 +293,10 @@ TaskGraphResult TaskService::taskGraphSnapshot() const
                                    availabilities.value(plannedTask.task.id()),
                                    levels.value(plannedTask.task.id(), 0),
                                    graph.predecessorClosure(plannedTask.task.id()),
-                                   graph.successorClosure(plannedTask.task.id())});
+                                   graph.successorClosure(plannedTask.task.id()),
+                                   coreIds.contains(plannedTask.task.id())});
         }
 
-        QList<TaskDependency> visibleDependencies;
-        for (const TaskDependency &dependency : dependencies) {
-            if (visibleIds.contains(dependency.predecessorId)
-                && visibleIds.contains(dependency.successorId)) {
-                visibleDependencies.append(dependency);
-            }
-        }
         std::sort(visibleDependencies.begin(), visibleDependencies.end(),
                   [](const TaskDependency &left,
                      const TaskDependency &right) {
@@ -431,6 +491,13 @@ TaskResult TaskService::createTask(const TaskCreationRequest &request)
     }
 
     try {
+        if (request.task.categoryId.has_value()
+            && !m_categoryRepository.findCategoryById(*request.task.categoryId)
+                    .has_value()) {
+            return TaskResult::failure(
+                TaskError::TaskCategoryNotFound,
+                QStringLiteral("Selected task category was not found."));
+        }
         const QList<Task> tasks = m_repository.findAll();
         QList<TaskId> normalizedPredecessors = request.predecessorIds;
         normalizeIds(normalizedPredecessors);
@@ -544,6 +611,13 @@ TaskResult TaskService::updateTask(const TaskId &id, const TaskDraft &draft)
         const TaskValidationResult validation = validateDraft(draft);
         if (!validation.ok()) {
             return TaskResult::failure(validation.error, validation.detail);
+        }
+        if (draft.categoryId.has_value()
+            && !m_categoryRepository.findCategoryById(*draft.categoryId)
+                    .has_value()) {
+            return TaskResult::failure(
+                TaskError::TaskCategoryNotFound,
+                QStringLiteral("Selected task category was not found."));
         }
         Task updated = makeTaskWithDetails(
             *current, draft, QDateTime::currentDateTimeUtc());

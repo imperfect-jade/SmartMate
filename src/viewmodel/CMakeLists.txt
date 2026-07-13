@@ -15,6 +15,10 @@ qt_add_qml_module(smartmate_viewmodel
         TaskErrorMapper.cpp
         TaskPresentationFormatter.h
         TaskPresentationFormatter.cpp
+        TaskCategoryPresentation.h
+        TaskCategoryPresentation.cpp
+        TaskCategoryViewModel.h
+        TaskCategoryViewModel.cpp
         TaskGraphViewModel.h
         TaskGraphViewModel.cpp
         TaskGraphProjectionModels.h

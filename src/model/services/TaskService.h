@@ -4,6 +4,7 @@
 #include "domain/TaskStateMachine.h"
 #include "repositories/ITaskBatchTransitionRepository.h"
 #include "repositories/ITaskCreationRepository.h"
+#include "repositories/ITaskCategoryRepository.h"
 #include "repositories/ITaskDeletionRepository.h"
 #include "repositories/ITaskDependencyRepository.h"
 #include "repositories/ITaskRepository.h"
@@ -23,6 +24,7 @@ public:
                 ITaskCreationRepository &creationRepository,
                 ITaskBatchTransitionRepository &batchTransitionRepository,
                 ITaskDeletionRepository &deletionRepository,
+                ITaskCategoryRepository &categoryRepository,
                 QObject *parent = nullptr);
 
     /// 执行无副作用的权威业务校验：不访问 Repository，也不发出状态通知。
@@ -40,6 +42,9 @@ public:
         const TaskId &taskId) const;
     /// 生成依赖图领域快照；只保留活动节点及与其处于同一依赖组件的归档节点。
     [[nodiscard]] TaskGraphResult taskGraphSnapshot() const;
+    /// 按类别裁剪图：保留核心节点及其直接跨类别邻居，隐藏外部节点之间的边。
+    [[nodiscard]] TaskGraphResult taskGraphSnapshot(
+        const TaskGraphQuery &query) const;
     /// 原子替换活动 Todo 任务的全部前置；空列表清空关系，失败不会部分写入。
     [[nodiscard]] TaskDependencyListResult replaceTaskPredecessors(
         const TaskId &taskId,
@@ -99,6 +104,8 @@ private:
     ITaskBatchTransitionRepository &m_batchTransitionRepository;
     /// 永久删除端口保证任务与全部入边、出边在同一事务内移除。
     ITaskDeletionRepository &m_deletionRepository;
+    /// 仅用于验证任务草稿中的稳定类别ID和分类图查询，不承担类别生命周期命令。
+    ITaskCategoryRepository &m_categoryRepository;
 };
 
 } // namespace smartmate::model

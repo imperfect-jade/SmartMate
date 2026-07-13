@@ -25,6 +25,10 @@ Rectangle {
     required property bool selected
     required property int emphasisLevel
     required property bool filterMatched
+    required property string categoryName
+    required property string categoryAccent
+    required property bool hasCategory
+    required property bool coreNode
     signal selectedRequested(string taskId)
     signal hoverRequested(string taskId, bool hovered)
 
@@ -35,13 +39,16 @@ Rectangle {
     height: node.nodeHeight
     radius: 11
     color: node.selected ? node.theme.primarySoft
+          : !node.coreNode ? node.theme.surfaceStrong
           : node.archived ? node.theme.surfaceStrong : node.theme.surfaceElevated
     border.width: node.selected ? 3 : node.stateColorKey === 1 ? 2.5 : 1.5
     border.color: node.selected || node.stateColorKey === 1 ? node.theme.primary
+        : !node.coreNode ? node.theme.archived
         : node.blocked ? node.theme.warning
         : node.archived ? node.theme.archived : node.theme.borderStrong
     opacity: !node.filterMatched
-             || node.emphasisLevel === TaskGraphViewModel.UnrelatedEmphasis ? 0.32 : 1.0
+             || node.emphasisLevel === TaskGraphViewModel.UnrelatedEmphasis ? 0.32
+             : !node.coreNode && !node.selected ? 0.68 : 1.0
     scale: node.selected ? 1.025 : 1.0
     Behavior on opacity { NumberAnimation { duration: 140 } }
     Behavior on scale { NumberAnimation { duration: 140 } }
@@ -66,12 +73,33 @@ Rectangle {
             Layout.fillWidth: true
             Rectangle { Layout.preferredWidth: 9; Layout.preferredHeight: 9; radius: 5; color: node.blocked ? node.theme.warning : node.theme.statusColor(node.stateColorKey) }
             Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: node.title; color: node.theme.textPrimary; font.bold: true; font.pixelSize: node.theme.px(14); elide: Text.ElideRight }
+            Rectangle {
+                visible: node.hasCategory
+                Layout.maximumWidth: node.theme.px(72)
+                implicitWidth: Math.min(node.theme.px(72), nodeCategoryLabel.implicitWidth + 12)
+                implicitHeight: nodeCategoryLabel.implicitHeight + 5
+                radius: height / 2
+                color: Qt.alpha(node.categoryAccent, 0.12)
+                border.color: node.categoryAccent
+                Label {
+                    id: nodeCategoryLabel
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+                    verticalAlignment: Text.AlignVCenter
+                    text: node.categoryName
+                    color: node.categoryAccent
+                    font.pixelSize: node.theme.px(10)
+                    elide: Text.ElideRight
+                }
+            }
             Label { text: node.blocked ? "🔒" : ""; visible: node.blocked; font.pixelSize: node.theme.px(12) }
         }
         Label { Layout.fillWidth: true; text: qsTr("%1 · %2优先级").arg(node.statusText).arg(node.priorityText); color: node.theme.textSecondary; font.pixelSize: node.theme.px(12); elide: Text.ElideRight }
         Label {
             Layout.fillWidth: true
-            text: node.blocked ? qsTr("等待前置任务")
+            text: !node.coreNode ? qsTr("跨类别上下文")
+                : node.blocked ? qsTr("等待前置任务")
                 : node.unlockCount > 0 ? qsTr("完成后解锁 %1 项").arg(node.unlockCount)
                 : node.deadlineText
             color: node.blocked ? node.theme.warning : node.theme.textMuted

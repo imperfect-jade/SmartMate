@@ -55,6 +55,8 @@ set_source_files_properties(qml/SettingsPage.qml
     PROPERTIES QT_RESOURCE_ALIAS SettingsPage.qml)
 set_source_files_properties(qml/TaskDetailsDialog.qml
     PROPERTIES QT_RESOURCE_ALIAS TaskDetailsDialog.qml)
+set_source_files_properties(qml/TaskCategoryDialog.qml
+    PROPERTIES QT_RESOURCE_ALIAS TaskCategoryDialog.qml)
 
 qt_add_qml_module(smartmate_ui
     STATIC
@@ -77,6 +79,7 @@ qt_add_qml_module(smartmate_ui
         qml/AppearanceTheme.qml
         qml/SettingsPage.qml
         qml/TaskDetailsDialog.qml
+        qml/TaskCategoryDialog.qml
     IMPORTS
         TARGET smartmate_viewmodel
     DEPENDENCIES
