@@ -1,5 +1,7 @@
 # Windows 部署与 Qt DLL 排障
 
+> **迁移状态**：本文描述当前 QML 行为基线的有效部署流程。Qt Widgets 版本接管正式 `SmartMate` 前，QML 模块、`--qmldir` 和相关 DLL 仍必须部署；切换完成后将按[Qt Widgets 迁移指南](widgets-migration.md)统一删除这些步骤并重新验证发布目录。临时 `SmartMateWidgets` 不作为正式分发目标。
+
 ## 1. 为什么会提示缺少 DLL
 
 CMake 构建得到的 `SmartMate.exe` 只包含 SmartMate 自身代码。Qt 默认使用动态链接，程序启动时还要加载：
