@@ -1,3 +1,4 @@
+# 应用核心只负责运行环境与对象组合，保持可被正式入口和启动测试复用。
 add_library(smartmate_app_core STATIC
     AppBootstrapper.h
     AppBootstrapper.cpp
@@ -18,6 +19,7 @@ target_link_libraries(smartmate_app_core
         Qt6::Core
 )
 
+# 正式且唯一的 Qt Widgets 可执行目标。
 qt_add_executable(SmartMate WIN32
     main.cpp
 )

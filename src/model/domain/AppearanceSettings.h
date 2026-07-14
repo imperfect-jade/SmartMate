@@ -22,16 +22,20 @@ enum class UiFontScale : int {
     Large = 2,
 };
 
-/// 外观偏好是普通值类型，不依赖 QML 或具体持久化 API。
+/// 外观偏好是普通值类型，不依赖具体 View 或持久化 API。
 struct AppearanceSettings final {
+    /// 窗口表面、导航和控件使用的主题强调色。
     AccentTheme accentTheme{AccentTheme::Green};
+    /// 正文和控件使用的受支持字体档位。
     UiFontFamily fontFamily{UiFontFamily::System};
+    /// 界面字号缩放档位，不直接保存像素大小。
     UiFontScale fontScale{UiFontScale::Standard};
 
     friend bool operator==(const AppearanceSettings &,
                            const AppearanceSettings &) = default;
 };
 
+/// 校验所有枚举均属于当前支持集合，防御持久化损坏或非法强制转换。
 [[nodiscard]] bool isValid(const AppearanceSettings &settings) noexcept;
 
 } // namespace smartmate::model

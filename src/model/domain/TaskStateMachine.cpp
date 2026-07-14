@@ -5,6 +5,7 @@ namespace {
 
 [[nodiscard]] TaskStatus safeRestoreStatus(const Task &task) noexcept
 {
+    // 正常新数据只会记录 Done/Cancelled；缺失或旧活动状态统一降级到 Todo。
     if (!task.statusBeforeArchive().has_value()) {
         return TaskStatus::Todo;
     }
@@ -29,6 +30,7 @@ std::optional<TaskStatus> TaskStateMachine::targetStatus(
     const Task &task,
     const TaskTransition transition) noexcept
 {
+    // 所有生命周期入口共用这一张显式矩阵，禁止调用方自行指定目标状态。
     switch (transition) {
     case TaskTransition::Start:
         return task.status() == TaskStatus::Todo

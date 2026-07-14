@@ -11,10 +11,13 @@
 namespace smartmate::model {
 
 /// 尚未校验的普通任务字段输入；不包含状态，状态只能由显式领域命令改变。
+/// 任务草稿
 struct TaskDraft final {
+    /// 用户可见标题；去空白和长度规则由 Model 校验。
     QString title;
     /// 未填写描述时使用非 null 空字符串；描述可空不等于数据库中的 SQL NULL。
     QString description{QStringLiteral("")};
+    /// 用户选择的业务优先级，不代表最终推荐顺序。
     TaskPriority priority{TaskPriority::Normal};
     /// 空值表示没有截止时间；非空时间会在写入领域实体前统一转换为 UTC。
     std::optional<QDateTime> deadline;
@@ -62,16 +65,27 @@ public:
     friend bool operator==(const Task &, const Task &) = default;
 
 private:
+    /// 永不随标题、状态或排序变化的任务身份。
     TaskId m_id;
+    /// 用户可见标题，仅 Todo 状态允许修改。
     QString m_title;
+    /// 可选描述在领域内始终使用非 null 字符串。
     QString m_description;
+    /// 业务优先级，由规划策略参与推荐排序。
     TaskPriority m_priority{TaskPriority::Normal};
+    /// 当前生命周期状态，只能通过 TaskStateMachine 允许的命令变化。
     TaskStatus m_status{TaskStatus::Todo};
+    /// 归档前的恢复目标；非 Archived 状态应为空。
     std::optional<TaskStatus> m_statusBeforeArchive;
+    /// 可选截止时间，存在时统一使用 UTC。
     std::optional<QDateTime> m_deadline;
+    /// 可选预计用时，单位为分钟。
     std::optional<int> m_estimatedMinutes;
+    /// 可空类别身份；任务快照不复制类别名称和颜色。
     std::optional<TaskCategoryId> m_categoryId;
+    /// 首次创建时间，使用 UTC 且普通编辑不会改变。
     QDateTime m_createdAtUtc;
+    /// 最近一次成功写入时间，使用 UTC。
     QDateTime m_updatedAtUtc;
 };
 

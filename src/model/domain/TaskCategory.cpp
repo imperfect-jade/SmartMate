@@ -28,6 +28,7 @@ bool isValidTaskCategoryColor(const TaskCategoryColor color) noexcept
 
 QString taskCategoryColorToStorageText(const TaskCategoryColor color)
 {
+    // 使用稳定英文文本而非枚举序号，避免将来调整 C++ 枚举破坏旧数据。
     switch (color) {
     case TaskCategoryColor::Blue:
         return QStringLiteral("blue");
@@ -52,6 +53,7 @@ QString taskCategoryColorToStorageText(const TaskCategoryColor color)
 std::optional<TaskCategoryColor> taskCategoryColorFromStorageText(
     const QString &text)
 {
+    // 未知文本不猜测默认值，让 Repository 能明确报告损坏数据。
     if (text == QStringLiteral("blue")) {
         return TaskCategoryColor::Blue;
     }
