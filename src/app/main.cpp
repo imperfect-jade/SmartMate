@@ -1,10 +1,10 @@
 #include "AppBootstrapper.h"
 #include "ApplicationRuntime.h"
+#include "view/widgets/MainWindow.h"
 
+#include <QApplication>
 #include <QCoreApplication>
-#include <QGuiApplication>
 #include <QLoggingCategory>
-#include <QQmlApplicationEngine>
 #include <QTimer>
 
 #include <cstdlib>
@@ -12,21 +12,15 @@
 
 int main(int argc, char *argv[])
 {
-    QGuiApplication application(argc, argv);
+    QApplication application(argc, argv);
     smartmate::app::configureApplicationIdentity();
 
     try {
         const auto runtime = smartmate::app::applicationRuntime();
-        // bootstrapper 先于 QML 引擎构造、后于引擎析构，保证所有 QML 绑定
-        // 都在其引用的 ViewModel 被释放前结束。
         smartmate::app::AppBootstrapper bootstrapper{runtime.databasePath};
-        QQmlApplicationEngine engine;
-        bootstrapper.configure(engine);
-        engine.loadFromModule(QStringLiteral("SmartMate.View"), QStringLiteral("Main"));
-
-        if (engine.rootObjects().isEmpty()) {
-            return EXIT_FAILURE;
-        }
+        smartmate::view::widgets::MainWindow window{
+            bootstrapper.widgetDependencies()};
+        window.show();
 
         if (runtime.smokeTest) {
             QTimer::singleShot(0, &application, &QCoreApplication::quit);

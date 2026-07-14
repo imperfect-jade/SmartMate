@@ -235,7 +235,6 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
                         categoryRepository};
     AppViewModel app{service};
 
-    QCOMPARE(app.applicationName(), QStringLiteral("SmartMate"));
     QVERIFY(app.taskList() != nullptr);
     QVERIFY(app.taskFocus() != nullptr);
     QVERIFY(app.taskDetails() != nullptr);

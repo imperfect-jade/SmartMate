@@ -2,7 +2,6 @@
 
 #include <memory>
 
-class QQmlApplicationEngine;
 class QString;
 
 namespace smartmate::model {
@@ -32,9 +31,6 @@ class AppBootstrapper final {
 public:
     explicit AppBootstrapper(QString databasePath);
     ~AppBootstrapper();
-
-    /// 将 C++ 管理的根 ViewModel 注入 QML 引擎的必需根属性。
-    void configure(QQmlApplicationEngine &engine);
 
     /// 将具体 ViewModel 向上转换为 Widgets 当前切片所需的抽象契约。
     [[nodiscard]] view::widgets::MainWindowDependencies widgetDependencies() noexcept;

@@ -19,7 +19,7 @@ target_link_libraries(smartmate_app_core
 )
 
 qt_add_executable(SmartMate WIN32
-    main_widgets.cpp
+    main.cpp
 )
 
 target_link_libraries(SmartMate
@@ -28,24 +28,3 @@ target_link_libraries(SmartMate
         smartmate_widgets
         Qt6::Widgets
 )
-
-if(SMARTMATE_BUILD_QML_BASELINE)
-    qt_add_executable(SmartMateQmlBaseline WIN32
-        main.cpp
-        AppBootstrapperQml.cpp
-    )
-
-    target_link_libraries(SmartMateQmlBaseline
-        PRIVATE
-            smartmate_app_core
-            smartmate_viewmodel_qml
-            smartmate_viewmodel_qmlplugin
-            smartmate_ui
-            smartmate_uiplugin
-            Qt6::Gui
-            Qt6::Qml
-            Qt6::Quick
-    )
-
-    qt_import_qml_plugins(SmartMateQmlBaseline)
-endif()

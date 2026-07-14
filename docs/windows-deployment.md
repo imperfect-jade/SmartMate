@@ -1,6 +1,6 @@
 # Windows 部署与 Qt DLL 排障
 
-> **迁移状态**：Qt Widgets 已接管正式 `SmartMate`。旧 `SmartMateQmlBaseline` 只用于删除门禁前的开发期对照，不进入发布目录；发布脚本始终关闭 QML 基线并验证纯 Widgets 运行时闭包。
+> **当前实现**：`SmartMate` 仅使用 Qt Widgets。发布脚本会验证纯 Widgets 运行时闭包，并拒绝意外出现的 QML/Qt Quick 文件。
 
 ## 1. 为什么会提示缺少 DLL
 
@@ -29,7 +29,7 @@ $env:PATH="$env:QT_ROOT/bin;$env:QT_MINGW_ROOT/bin;$env:PATH"
 
 ## 3. 正确的 Release 发布方法
 
-仓库中的部署脚本会关闭临时 QML 基线、只构建正式 `SmartMate`，再调用同一 Qt 安装目录下的 `windeployqt.exe`，复制所需 Qt Widgets DLL、平台插件与 MinGW 运行库：
+仓库中的部署脚本只构建正式 `SmartMate`，再调用同一 Qt 安装目录下的 `windeployqt.exe`，复制所需 Qt Widgets DLL、平台插件与 MinGW 运行库：
 
 ```powershell
 $env:QT_ROOT='D:/Qt/6.10.2/mingw_64'

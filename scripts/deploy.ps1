@@ -106,10 +106,10 @@ $env:PATH = "$qtBinDirectory;$mingwBinDirectory;$env:PATH"
 
 Push-Location $repositoryRoot
 try {
-    Write-Host "[1/5] Configure the Widgets-only $Configuration build"
+    Write-Host "[1/5] Configure the $Configuration build"
     Invoke-CheckedCommand `
         -Executable $cmakeCommand.Source `
-        -Arguments @('--preset', $preset, '-DSMARTMATE_BUILD_QML_BASELINE=OFF') `
+        -Arguments @('--preset', $preset) `
         -FailureMessage 'CMake configuration failed'
 
     Write-Host '[2/5] Build the official SmartMate target'

@@ -20,6 +20,3 @@ target_link_libraries(smartmate_viewmodel_contracts
         smartmate_common
         Qt6::Core
 )
-
-# QML 迁移期的 foreign wrapper 需要消费这份元对象 JSON，Contracts 本身仍不链接 QML。
-qt_extract_metatypes(smartmate_viewmodel_contracts)

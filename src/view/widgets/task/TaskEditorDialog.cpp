@@ -381,8 +381,14 @@ void TaskEditorDialog::synchronize()
     const QSignalBlocker descriptionBlocker(m_description);
     const QSignalBlocker priorityBlocker(m_priority);
     const QSignalBlocker categoryBlocker(m_category);
-    m_title->setText(m_editor.title());
-    m_description->setPlainText(m_editor.description());
+    // 用户输入会先写入 Contract，再通过通知回到这里。值未变化时必须保持
+    // 编辑控件原状，否则 setPlainText() 会把光标移到开头，连续输入将倒序。
+    if (m_title->text() != m_editor.title()) {
+        m_title->setText(m_editor.title());
+    }
+    if (m_description->toPlainText() != m_editor.description()) {
+        m_description->setPlainText(m_editor.description());
+    }
     m_status->setText(m_editor.editMode() ? m_editor.currentStatusText() : tr("初始状态：待办"));
     if (m_priority->count() != m_editor.priorityOptions().size()) {
         m_priority->clear();

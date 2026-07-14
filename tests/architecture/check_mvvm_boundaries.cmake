@@ -190,16 +190,6 @@ if(EXISTS "${viewmodel_cmake}")
     endif()
 endif()
 
-set(view_cmake "${ROOT_DIR}/src/view/CMakeLists.txt")
-if(EXISTS "${view_cmake}")
-    file(READ "${view_cmake}" view_cmake_contents)
-    string(TOLOWER "${view_cmake_contents}" view_cmake_lower)
-    if(view_cmake_lower MATCHES "smartmate_persistence|qt6::sql")
-        record_violation("${view_cmake}"
-            "smartmate_ui may not link concrete persistence or Qt SQL")
-    endif()
-endif()
-
 set(widgets_cmake "${ROOT_DIR}/src/view/widgets/CMakeLists.txt")
 if(EXISTS "${widgets_cmake}")
     file(READ "${widgets_cmake}" widgets_cmake_contents)
@@ -221,76 +211,21 @@ if(EXISTS "${app_cmake}")
     file(READ "${app_cmake}" app_cmake_contents)
     string(TOLOWER "${app_cmake_contents}" app_cmake_lower)
     string(FIND "${app_cmake_lower}" "qt_add_executable(smartmate win32" official_target_start)
-    string(FIND "${app_cmake_lower}" "if(smartmate_build_qml_baseline)" baseline_guard_start)
-    if(official_target_start LESS 0 OR baseline_guard_start LESS 0)
+    if(official_target_start LESS 0)
         record_violation("${app_cmake}"
-            "The official SmartMate Widgets target and guarded QML baseline are required")
+            "The official SmartMate Widgets target is required")
     else()
-        math(EXPR official_target_length
-            "${baseline_guard_start} - ${official_target_start}")
-        string(SUBSTRING "${app_cmake_lower}" ${official_target_start}
-            ${official_target_length} official_target_section)
-        if(NOT official_target_section MATCHES "smartmate_widgets"
-           OR NOT official_target_section MATCHES "qt6::widgets")
+        if(NOT app_cmake_lower MATCHES "smartmate_widgets"
+           OR NOT app_cmake_lower MATCHES "qt6::widgets")
             record_violation("${app_cmake}"
                 "The official SmartMate target must link smartmate_widgets and Qt Widgets")
         endif()
-        if(official_target_section MATCHES "smartmate_(ui|viewmodel_qml)|qt6::(qml|quick)")
-            record_violation("${app_cmake}"
-                "The official SmartMate target may not link the migration QML frontend")
-        endif()
     endif()
-    if(app_cmake_lower MATCHES "smartmatewidgets")
+    if(app_cmake_lower MATCHES "smartmatewidgets|smartmateqmlbaseline|smartmate_(ui|viewmodel_qml)|qt6::(qml|quick)")
         record_violation("${app_cmake}"
-            "The temporary SmartMateWidgets target must not remain after the entry switch")
+            "Removed migration frontend targets and Qt QML/Quick links may not remain")
     endif()
 endif()
-
-file(GLOB_RECURSE qml_files LIST_DIRECTORIES FALSE
-    "${ROOT_DIR}/src/view/*.qml")
-# View 只能绑定 ViewModel；这些检查阻止 QML 直接接触 Model、Service 或 SQL。
-foreach(qml_file IN LISTS qml_files)
-    file(READ "${qml_file}" qml_contents)
-    string(TOLOWER "${qml_contents}" qml_lower)
-
-    if(qml_lower MATCHES "import[ \t]+(smartmate\\.(model|persistence)|qtsql|qtquick\\.localstorage|qt\\.labs\\.settings)")
-        record_violation("${qml_file}"
-            "View imports a Model, persistence, SQL, or settings module")
-    endif()
-    if(qml_lower MATCHES "(service|repository|planningengine)[a-z0-9_]*[ \t]*\\.")
-        record_violation("${qml_file}"
-            "View appears to call a Service, Repository, or PlanningEngine directly")
-    endif()
-    if(qml_lower MATCHES "qsql[a-z0-9_]*")
-        record_violation("${qml_file}"
-            "View contains a Qt SQL type")
-    endif()
-    if(qml_lower MATCHES "\\.(filter|sort)[ \t\r\n]*\\(")
-        record_violation("${qml_file}"
-            "View contains JavaScript list filtering or sorting logic")
-    endif()
-    if(qml_lower MATCHES "taskdependencygraph|ordertasks|topological|depth[ _-]*first|cycle[ _-]*detect")
-        record_violation("${qml_file}"
-            "View appears to contain dependency graph traversal or ordering logic")
-    endif()
-    if(qml_lower MATCHES "status(index|options)")
-        record_violation("${qml_file}"
-            "View exposes task status as an editable field instead of explicit commands")
-    endif()
-    if(qml_lower MATCHES "(adjacency|breadth[ _-]*first|math\\.(atan2|sqrt|hypot))"
-       OR qml_lower MATCHES "(^|[^a-z])(dfs|bfs)([^a-z]|$)")
-        record_violation("${qml_file}"
-            "View appears to calculate graph traversal or arrow geometry")
-    endif()
-    get_filename_component(qml_name "${qml_file}" NAME)
-    string(TOLOWER "${qml_name}" qml_name_lower)
-    if(qml_name_lower MATCHES "dependency.*graph|graph.*dependency")
-        if(qml_lower MATCHES "(^|[^a-z])canvas[ 	\r\n{]")
-            record_violation("${qml_file}"
-                "Dependency graph must use declarative Shape paths, not Canvas algorithms")
-        endif()
-    endif()
-endforeach()
 
 # 语义资格不能靠禁止 TaskStatus 的脆弱正则判断；这里只锁定数据入口，
 # 具体候选和命令资格由 Model/ViewModel 契约测试验证。
@@ -344,19 +279,35 @@ foreach(source_file IN LISTS production_cpp)
         record_violation("${source_file}"
             "EventBus and Service Locator types are forbidden")
     endif()
-    if(contents MATCHES "QML_FOREIGN")
-        file(RELATIVE_PATH foreign_relative "${ROOT_DIR}" "${source_file}")
-        file(TO_CMAKE_PATH "${foreign_relative}" foreign_relative)
-        if(NOT foreign_relative STREQUAL "src/viewmodel/qml/ViewModelQmlForeignTypes.h")
-            record_violation("${source_file}"
-                "QML foreign wrappers may exist only in the concrete ViewModel module")
-        endif()
+    if(contents MATCHES "QML_[A-Z_]+|QQml[A-Za-z0-9_]*|QQuick[A-Za-z0-9_]*")
+        record_violation("${source_file}"
+            "Removed QML/Quick registration and runtime APIs may not remain in production code")
     endif()
 endforeach()
 
-file(GLOB_RECURSE ui_files LIST_DIRECTORIES FALSE "${ROOT_DIR}/src/*.ui")
-foreach(ui_file IN LISTS ui_files)
-    record_violation("${ui_file}" "Qt Designer .ui files are forbidden")
+file(GLOB_RECURSE removed_view_files LIST_DIRECTORIES FALSE
+    "${ROOT_DIR}/src/*.qml"
+    "${ROOT_DIR}/src/*.ui"
+    "${ROOT_DIR}/tests/*.qml"
+    "${ROOT_DIR}/tests/*.ui")
+foreach(view_file IN LISTS removed_view_files)
+    record_violation("${view_file}" "QML and Qt Designer .ui files are forbidden")
+endforeach()
+
+foreach(cmake_file IN ITEMS
+        "${ROOT_DIR}/CMakeLists.txt"
+        "${ROOT_DIR}/src/app/CMakeLists.txt"
+        "${ROOT_DIR}/src/viewmodel/contracts/CMakeLists.txt"
+        "${ROOT_DIR}/src/viewmodel/CMakeLists.txt"
+        "${ROOT_DIR}/tests/CMakeLists.txt")
+    if(EXISTS "${cmake_file}")
+        file(READ "${cmake_file}" cmake_contents)
+        string(TOLOWER "${cmake_contents}" cmake_lower)
+        if(cmake_lower MATCHES "qt_add_qml_module|qt_import_qml_plugins|qt_extract_metatypes|smartmateqmlbaseline|smartmate_(ui|viewmodel_qml)|quicktest|qt6::(qml|quick)")
+            record_violation("${cmake_file}"
+                "Removed QML/Quick targets and build APIs may not remain")
+        endif()
+    endif()
 endforeach()
 
 file(GLOB_RECURSE widget_cpp LIST_DIRECTORIES FALSE

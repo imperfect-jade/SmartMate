@@ -63,11 +63,6 @@ AppViewModel::AppViewModel(model::TaskService &taskService,
 {
 }
 
-QString AppViewModel::applicationName() const
-{
-    return QStringLiteral("SmartMate");
-}
-
 TaskListViewModel *AppViewModel::taskList() noexcept
 {
     return &m_taskList;

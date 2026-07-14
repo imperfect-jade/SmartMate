@@ -271,6 +271,7 @@ public:
     bool save() override { if (!canSave()) return false; active = false; emit sessionActiveChanged(); emit saved(QStringLiteral("id")); return true; }
     void cancel() override { active = false; emit sessionActiveChanged(); emit cancelled(); }
     void pushTitle(QString value) { titleValue = std::move(value); emit titleChanged(); }
+    void pushDescription(QString value) { descriptionValue = std::move(value); emit descriptionChanged(); }
     bool edit{false}, active{false}, pickerSelected{false}, acceptedSelected{false}; int priority{1};
     QString titleValue, descriptionValue, lastPredecessorId;
     int beginCreateCalls{0}, beginEditCalls{0}, titleWrites{0}, descriptionWrites{0};
@@ -363,6 +364,7 @@ class TaskWidgetsTest final : public QObject {
 private slots:
     void initialBindingAndUserCommandsUseContracts();
     void programmaticUpdatesDoNotWriteBack();
+    void textInputPreservesOrderAndCursor();
     void typedPickersPreserveValuesAndContractBounds();
     void categoryAndDependencyDialogsUseStableContractCommands();
     void creationPredecessorSelectionCommitsOrRestoresLocalDraft();
@@ -446,6 +448,38 @@ void TaskWidgetsTest::programmaticUpdatesDoNotWriteBack()
     editor.pushTitle(QStringLiteral("程序回填"));
     QCOMPARE(title->text(), QStringLiteral("程序回填"));
     QCOMPARE(editor.titleWrites, titleWrites);
+}
+
+void TaskWidgetsTest::textInputPreservesOrderAndCursor()
+{
+    FakeEditor editor;
+    view::widgets::TaskEditorDialog dialog{editor};
+    dialog.resize(700, 650);
+    QVERIFY(editor.beginCreate());
+    QTRY_VERIFY(dialog.isVisible());
+
+    auto *title = dialog.findChild<QLineEdit *>(QStringLiteral("taskTitleField"));
+    auto *description = dialog.findChild<QPlainTextEdit *>(
+        QStringLiteral("taskDescriptionArea"));
+    QVERIFY(title);
+    QVERIFY(description);
+
+    title->setFocus();
+    QTest::keyClicks(title, QStringLiteral("1234"));
+    QCOMPARE(title->text(), QStringLiteral("1234"));
+    QCOMPARE(editor.titleValue, QStringLiteral("1234"));
+    QCOMPARE(title->cursorPosition(), 4);
+
+    description->setFocus();
+    QTest::keyClicks(description, QStringLiteral("1234"));
+    QCOMPARE(description->toPlainText(), QStringLiteral("1234"));
+    QCOMPARE(editor.descriptionValue, QStringLiteral("1234"));
+    QCOMPARE(description->textCursor().position(), 4);
+
+    const int descriptionWrites = editor.descriptionWrites;
+    editor.pushDescription(QStringLiteral("程序性描述回填"));
+    QCOMPARE(description->toPlainText(), QStringLiteral("程序性描述回填"));
+    QCOMPARE(editor.descriptionWrites, descriptionWrites);
 }
 
 void TaskWidgetsTest::typedPickersPreserveValuesAndContractBounds()

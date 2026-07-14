@@ -30,16 +30,6 @@
       }
     },
     {
-      "name": "debug-widgets-only",
-      "displayName": "Qt MinGW Debug (Widgets only)",
-      "inherits": "base",
-      "binaryDir": "${sourceDir}/build/widgets-only",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "SMARTMATE_BUILD_QML_BASELINE": "OFF"
-      }
-    },
-    {
       "name": "release",
       "displayName": "Qt MinGW Release",
       "inherits": "base",
@@ -55,10 +45,6 @@
       "configurePreset": "debug"
     },
     {
-      "name": "debug-widgets-only",
-      "configurePreset": "debug-widgets-only"
-    },
-    {
       "name": "release",
       "configurePreset": "release"
     }
@@ -67,14 +53,6 @@
     {
       "name": "debug",
       "configurePreset": "debug",
-      "inheritConfigureEnvironment": true,
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "debug-widgets-only",
-      "configurePreset": "debug-widgets-only",
       "inheritConfigureEnvironment": true,
       "output": {
         "outputOnFailure": true
