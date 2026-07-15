@@ -23,6 +23,8 @@ add_library(smartmate_viewmodel STATIC
     TaskCategoryViewModel.cpp
     TaskGraphViewModel.h
     TaskGraphViewModel.cpp
+    TaskGraphInteraction.cpp
+    TaskGraphProjection.cpp
     TaskGraphProjectionModels.h
     TaskGraphProjectionModels.cpp
     TaskGraphLayout.h

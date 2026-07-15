@@ -85,6 +85,8 @@ signals:
 private:
     using NodeProjection = TaskGraphNodeProjection;
 
+    /// 将领域稳定 ID 投影为 Contract 使用的不带花括号字符串。
+    [[nodiscard]] static QString stableId(const model::TaskId &id);
     [[nodiscard]] int rowForTask(const model::TaskId &taskId) const;
     [[nodiscard]] const NodeProjection *selectedNode() const;
     [[nodiscard]] int emphasisFor(const model::TaskId &taskId) const;
