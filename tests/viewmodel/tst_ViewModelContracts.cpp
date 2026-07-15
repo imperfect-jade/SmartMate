@@ -4,6 +4,7 @@
 #include "TaskEditorViewModel.h"
 #include "TaskGraphViewModel.h"
 #include "TaskListViewModel.h"
+#include "TaskProjectionSources.h"
 #include "TaskFocusViewModel.h"
 #include "TaskDetailsViewModel.h"
 #include "common/presentation/UiNotification.h"
@@ -82,6 +83,8 @@ struct TaskServiceFixture {
     tests::FakeTaskCategoryRepository categories;
     model::TaskService service{tasks, dependencies, creation, batchTransitions,
                                deletion, categories};
+    viewmodel::TaskPlanProjectionSource planSource{service};
+    viewmodel::TaskCategoryProjectionSource categorySource;
 };
 
 [[nodiscard]] bool hasMetaMethod(const QMetaObject &metaObject,
@@ -138,37 +141,44 @@ void ViewModelContractsTest::contractReferencesDispatchToConcreteImplementations
     QCOMPARE(appearanceContract.accentThemeIndex(), 1);
 
     TaskServiceFixture fixture;
-    viewmodel::TaskListViewModel list{fixture.service};
+    viewmodel::TaskListViewModel list{fixture.service, fixture.planSource,
+                                      fixture.categorySource};
     viewmodel::TaskListContract &listContract = list;
     listContract.setShowArchived(true);
     QVERIFY(listContract.showArchived());
 
-    viewmodel::TaskFocusViewModel focus{fixture.service};
+    viewmodel::TaskFocusViewModel focus{fixture.planSource,
+                                        fixture.categorySource};
     viewmodel::TaskFocusContract &focusContract = focus;
     QCOMPARE(focusContract.focusState(),
              viewmodel::TaskFocusContract::FocusState::NoTasks);
 
-    viewmodel::TaskDetailsViewModel details{fixture.service};
+    viewmodel::TaskDetailsViewModel details{fixture.planSource,
+                                            fixture.categorySource};
     viewmodel::TaskDetailsContract &detailsContract = details;
     QVERIFY(!detailsContract.selectTask(QStringLiteral("invalid")));
 
-    viewmodel::TaskCategoryViewModel category{fixture.service};
+    viewmodel::TaskCategoryViewModel category{nullptr, fixture.planSource,
+                                               fixture.categorySource};
     viewmodel::TaskCategoryContract &categoryContract = category;
     categoryContract.beginCreate();
     categoryContract.setDraftName(QStringLiteral("学习"));
     QCOMPARE(categoryContract.draftName(), QStringLiteral("学习"));
 
-    viewmodel::TaskDependencyViewModel dependency{fixture.service};
+    viewmodel::TaskDependencyViewModel dependency{fixture.service,
+                                                   fixture.categorySource};
     viewmodel::TaskDependencyContract &dependencyContract = dependency;
     QVERIFY(!dependencyContract.beginEdit(QStringLiteral("invalid")));
 
-    viewmodel::TaskEditorViewModel editor{fixture.service};
+    viewmodel::TaskEditorViewModel editor{fixture.service,
+                                           fixture.categorySource};
     viewmodel::TaskEditorContract &editorContract = editor;
     QVERIFY(editorContract.beginCreate());
     editorContract.setTitle(QStringLiteral("契约调用"));
     QCOMPARE(editorContract.title(), QStringLiteral("契约调用"));
 
-    viewmodel::TaskGraphViewModel graph{fixture.service};
+    viewmodel::TaskGraphViewModel graph{fixture.service,
+                                         fixture.categorySource};
     viewmodel::TaskGraphContract &graphContract = graph;
     graphContract.setSearchText(QStringLiteral("节点"));
     QCOMPARE(graphContract.searchText(), QStringLiteral("节点"));
@@ -212,11 +222,16 @@ void ViewModelContractsTest::concreteMetaObjectsExposeInheritedQmlApi()
 void ViewModelContractsTest::listImplementationsRespectTheItemModelProtocol()
 {
     TaskServiceFixture fixture;
-    viewmodel::TaskCategoryViewModel category{fixture.service};
-    viewmodel::TaskDependencyViewModel dependency{fixture.service};
-    viewmodel::TaskEditorViewModel editor{fixture.service};
-    viewmodel::TaskGraphViewModel graph{fixture.service};
-    viewmodel::TaskListViewModel list{fixture.service};
+    viewmodel::TaskCategoryViewModel category{nullptr, fixture.planSource,
+                                               fixture.categorySource};
+    viewmodel::TaskDependencyViewModel dependency{fixture.service,
+                                                   fixture.categorySource};
+    viewmodel::TaskEditorViewModel editor{fixture.service,
+                                           fixture.categorySource};
+    viewmodel::TaskGraphViewModel graph{fixture.service,
+                                         fixture.categorySource};
+    viewmodel::TaskListViewModel list{fixture.service, fixture.planSource,
+                                      fixture.categorySource};
 
     QAbstractItemModelTester categoryTester{
         &category, QAbstractItemModelTester::FailureReportingMode::QtTest};
@@ -266,7 +281,8 @@ void ViewModelContractsTest::failuresRaiseRepeatableTypedNotifications()
 
     TaskServiceFixture fixture;
 
-    viewmodel::TaskCategoryViewModel category{fixture.service};
+    viewmodel::TaskCategoryViewModel category{nullptr, fixture.planSource,
+                                               fixture.categorySource};
     QSignalSpy categorySpy{&category,
         &viewmodel::TaskCategoryContract::notificationRaised};
     category.beginEdit(QStringLiteral("invalid"));
@@ -275,7 +291,8 @@ void ViewModelContractsTest::failuresRaiseRepeatableTypedNotifications()
     category.clearError();
     QCOMPARE(categorySpy.count(), 2);
 
-    viewmodel::TaskDependencyViewModel dependency{fixture.service};
+    viewmodel::TaskDependencyViewModel dependency{fixture.service,
+                                                   fixture.categorySource};
     QSignalSpy dependencySpy{&dependency,
         &viewmodel::TaskDependencyContract::notificationRaised};
     dependency.beginEdit(QStringLiteral("invalid"));
@@ -284,14 +301,16 @@ void ViewModelContractsTest::failuresRaiseRepeatableTypedNotifications()
     dependency.clearError();
     QCOMPARE(dependencySpy.count(), 2);
 
-    viewmodel::TaskEditorViewModel editor{fixture.service};
+    viewmodel::TaskEditorViewModel editor{fixture.service,
+                                           fixture.categorySource};
     QSignalSpy editorSpy{&editor,
         &viewmodel::TaskEditorContract::notificationRaised};
     editor.save();
     editor.save();
     verifyErrorNotifications(editorSpy, QStringLiteral("任务编辑失败"));
 
-    viewmodel::TaskListViewModel list{fixture.service};
+    viewmodel::TaskListViewModel list{fixture.service, fixture.planSource,
+                                      fixture.categorySource};
     QSignalSpy listSpy{&list,
         &viewmodel::TaskListContract::notificationRaised};
     list.startTask(QStringLiteral("invalid"));
@@ -300,7 +319,8 @@ void ViewModelContractsTest::failuresRaiseRepeatableTypedNotifications()
     list.clearError();
     QCOMPARE(listSpy.count(), 2);
 
-    viewmodel::TaskGraphViewModel graph{fixture.service};
+    viewmodel::TaskGraphViewModel graph{fixture.service,
+                                         fixture.categorySource};
     QSignalSpy graphSpy{&graph,
         &viewmodel::TaskGraphContract::notificationRaised};
     fixture.tasks.setReadFailure(true);

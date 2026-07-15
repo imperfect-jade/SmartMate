@@ -21,7 +21,7 @@ namespace smartmate::viewmodel {
 
 /// 应用级 ViewModel 只负责组合子 ViewModel；它不保存界面控件，
 /// 也不把具体 Repository 或数据库实现泄漏给 View。
-/// 子 ViewModel 通过共享 Service 通知独立刷新，彼此不直接调用。
+/// 子 ViewModel 通过共享投影源同步读取，彼此不直接调用。
 class AppViewModel : public QObject {
 public:
     /// 下列构造重载用于按功能注入 Service；正式组合根使用完整依赖版本。
@@ -48,16 +48,16 @@ public:
     [[nodiscard]] AppearanceSettingsViewModel *appearanceSettings() noexcept;
 
 private:
-    // 子 ViewModel 共享任务与类别 Service 的状态通知，但彼此不直接调用，
-    // 从而让列表、编辑器、类别管理和依赖图保持同步而不形成隐式耦合。
+    /// 投影源必须早于所有消费者构造，并与 AppViewModel 同生命周期。
+    TaskPlanProjectionSource m_taskPlanSource;
+    TaskCategoryProjectionSource m_taskCategorySource;
     /// 值成员与 AppViewModel 同生命周期，地址在运行期间稳定。
     TaskCategoryViewModel m_taskCategories;
     TaskListViewModel m_taskList;
     TaskFocusViewModel m_taskFocus;
     TaskDetailsViewModel m_taskDetails;
     TaskEditorViewModel m_taskEditor;
-    /// QObject 子对象；使用指针是因为其构造路径需要可选依赖，所有权仍归 this。
-    TaskDependencyViewModel *m_taskDependencies;
+    TaskDependencyViewModel m_taskDependencies;
     TaskGraphViewModel m_taskGraph;
     AppearanceSettingsViewModel m_appearanceSettings;
 };

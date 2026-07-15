@@ -22,7 +22,8 @@ void TaskViewModelsTest::listProjectsActiveAndArchivedTasksInPlanOrder()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     QCOMPARE(viewModel.count(), 3);
     QCOMPARE(idAt(viewModel, 0), QStringLiteral("11111111-1111-1111-1111-111111111111"));
@@ -93,7 +94,8 @@ void TaskViewModelsTest::listMapsEveryRecommendedOrderReason()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     QCOMPARE(reasonForId(viewModel, inProgress.id().toString(QUuid::WithoutBraces)),
              QStringLiteral("正在进行"));
@@ -142,7 +144,8 @@ void TaskViewModelsTest::listSearchesTrimmedKeywordsInTitleAndDescription()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     viewModel.setSearchText(QStringLiteral("  report  "));
     QCOMPARE(viewModel.searchText(), QStringLiteral("  report  "));
@@ -190,7 +193,8 @@ void TaskViewModelsTest::listCombinesPrioritySearchAndArchiveFilters()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     QCOMPARE(viewModel.priorityFilterOptions(),
              QStringList({QStringLiteral("全部优先级"), QStringLiteral("低"),
@@ -227,7 +231,8 @@ void TaskViewModelsTest::listFilterPropertiesNotifyOnceAndRejectInvalidIndexes()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
     QSignalSpy searchSpy{&viewModel, &TaskListViewModel::searchTextChanged};
     QSignalSpy prioritySpy{&viewModel,
                            &TaskListViewModel::priorityFilterIndexChanged};
@@ -280,7 +285,8 @@ void TaskViewModelsTest::listRetainsFiltersAndStableTaskIdAcrossServiceReloads()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     viewModel.setSearchText(QStringLiteral("needle"));
     viewModel.setPriorityFilterIndex(4);
@@ -318,10 +324,11 @@ void TaskViewModelsTest::listSchedulesMinuteRefreshForTimeSensitiveReasons()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
-    TaskFocusViewModel focusViewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
+    TaskFocusViewModel focusViewModel{sources.plan, sources.categories};
 
-    const auto timers = viewModel.findChildren<QTimer *>(
+    const auto timers = sources.plan.findChildren<QTimer *>(
         QString{}, Qt::FindDirectChildrenOnly);
     QCOMPARE(timers.size(), 1);
     QCOMPARE(timers.constFirst()->interval(), 60'000);
@@ -334,16 +341,13 @@ void TaskViewModelsTest::listSchedulesMinuteRefreshForTimeSensitiveReasons()
     QVERIFY(!projectedOverdue());
     QVERIFY(!focusViewModel.focusOverdue());
 
-    // 不必真实等待一分钟：跨过截止时刻后直接触发同一 timeout 通道，
-    // 验证定时刷新会重新请求 Model 计划并更新列表与焦点投影。
+    // 不必真实等待一分钟：跨过截止时刻后触发共享源的唯一 timeout 通道，
+    // 验证一次计划查询会同步更新列表与焦点投影。
     QTRY_VERIFY_WITH_TIMEOUT(QDateTime::currentDateTimeUtc() > deadline, 3'000);
+    const int readsBeforeRefresh = repository.findAllCount();
     QVERIFY(QMetaObject::invokeMethod(timers.constFirst(), "timeout",
                                       Qt::DirectConnection));
-    const auto focusTimers = focusViewModel.findChildren<QTimer *>(
-        QString{}, Qt::FindDirectChildrenOnly);
-    QCOMPARE(focusTimers.size(), 1);
-    QVERIFY(QMetaObject::invokeMethod(focusTimers.constFirst(), "timeout",
-                                      Qt::DirectConnection));
+    QCOMPARE(repository.findAllCount(), readsBeforeRefresh + 1);
     QVERIFY(projectedOverdue());
     QVERIFY(focusViewModel.focusOverdue());
 }
@@ -375,8 +379,9 @@ void TaskViewModelsTest::listProjectsOverdueStateIndependentlyFromOrderReason()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
-    TaskFocusViewModel focusViewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
+    TaskFocusViewModel focusViewModel{sources.plan, sources.categories};
 
     const auto overdueFor = [&viewModel](const Task &stored) {
         const int row = rowForId(
@@ -421,7 +426,8 @@ void TaskViewModelsTest::listProjectsAndExecutesStateActionsByStableTaskId()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
     QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
     const QString stableId = idAt(viewModel, 0);
 
@@ -511,8 +517,9 @@ void TaskViewModelsTest::onlyTodoTasksCanOpenEditor()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel list{service};
-    TaskEditorViewModel editor{service};
+    ProjectionSources sources{service};
+    TaskListViewModel list{service, sources.plan, sources.categories};
+    TaskEditorViewModel editor{service, sources.categories};
     const auto canEdit = [&list](const Task &stored) {
         const int row = rowForId(
             list, stored.id().toString(QUuid::WithoutBraces));
@@ -562,8 +569,9 @@ void TaskViewModelsTest::listProjectsAndForwardsPermanentDeletionByStableTaskId(
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), localDeletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
-    TaskDetailsViewModel detailsViewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
+    TaskDetailsViewModel detailsViewModel{sources.plan, sources.categories};
 
     const int todoRow = rowForId(
         viewModel, todo.id().toString(QUuid::WithoutBraces));
@@ -612,7 +620,8 @@ void TaskViewModelsTest::listMaintainsBulkSelectionByStableIdAndResetsAtDisplayB
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchRepository, localDeletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
     QSignalSpy bulkSpy{&viewModel, &TaskListViewModel::bulkSelectionChanged};
 
     QCOMPARE(viewModel.bulkSelectableVisibleCount(), 2);
@@ -677,7 +686,8 @@ void TaskViewModelsTest::listExecutesAtomicBulkCommandsAndPreservesFailedSelecti
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchRepository, localDeletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
     QSignalSpy tasksSpy{&service, &TaskService::tasksChanged};
     QSignalSpy dependenciesSpy{&service, &TaskService::dependenciesChanged};
 
@@ -749,7 +759,8 @@ void TaskViewModelsTest::listMapsBatchConflictIdsToTaskTitles()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchRepository, localDeletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     viewModel.beginBulkSelection();
     viewModel.toggleSelectAllVisible();
@@ -771,7 +782,8 @@ void TaskViewModelsTest::listExposesAndClearsChineseErrors()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
     QSignalSpy errorSpy{&viewModel, &TaskListViewModel::errorOccurred};
 
     repository.setReadFailure(true);
@@ -805,7 +817,8 @@ void TaskViewModelsTest::listProjectsBlockingAndUnlockInformation()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     const int predecessorRow = rowForId(
         viewModel, predecessor.id().toString(QUuid::WithoutBraces));
@@ -856,8 +869,9 @@ void TaskViewModelsTest::listFocusProjectionIgnoresFiltersAndTracksInProgress()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskListViewModel viewModel{service};
-    TaskFocusViewModel focusViewModel{service};
+    ProjectionSources sources{service};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
+    TaskFocusViewModel focusViewModel{sources.plan, sources.categories};
 
     QCOMPARE(focusViewModel.focusState(), TaskFocusViewModel::FocusState::Suggested);
     QCOMPARE(focusViewModel.focusTaskId(), urgent.id().toString(QUuid::WithoutBraces));
@@ -890,7 +904,8 @@ void TaskViewModelsTest::listSelectsStableTaskDetails()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskDetailsViewModel viewModel{service};
+    ProjectionSources sources{service};
+    TaskDetailsViewModel viewModel{sources.plan, sources.categories};
 
     QVERIFY(viewModel.selectTask(stored.id().toString(QUuid::WithoutBraces)));
     QCOMPARE(viewModel.selectedTitle(), QStringLiteral("详情任务"));

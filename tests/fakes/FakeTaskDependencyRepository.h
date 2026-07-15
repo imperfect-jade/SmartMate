@@ -22,6 +22,7 @@ public:
 
     [[nodiscard]] QList<model::TaskDependency> findAllDependencies() const override
     {
+        ++m_findAllCount;
         if (m_failReads) {
             throw model::RepositoryException("Fake dependency read failure.");
         }
@@ -70,11 +71,14 @@ public:
         return m_replaceCount;
     }
 
+    [[nodiscard]] int findAllCount() const noexcept { return m_findAllCount; }
+
 private:
     friend class FakeTaskDeletionRepository;
 
     QList<model::TaskDependency> m_dependencies;
     int m_replaceCount{0};
+    mutable int m_findAllCount{0};
     bool m_failReads{false};
     bool m_failWrites{false};
 };

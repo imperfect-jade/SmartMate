@@ -3,11 +3,7 @@
 #include "TaskErrorMapper.h"
 #include "TaskPresentationFormatter.h"
 #include "TaskCategoryPresentation.h"
-#include "planner/TaskOrderingPolicy.h"
-#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
-
-#include <QDateTime>
 
 #include <algorithm>
 #include <utility>
@@ -17,49 +13,33 @@ namespace smartmate::viewmodel {
 namespace {
 constexpr int allPrioritiesFilterIndex = 0;
 constexpr int firstPriorityFilterIndex = 1;
-const model::TaskCommandAvailability emptyAvailability{};
-}
-
-TaskListViewModel::TaskListViewModel(model::TaskService &taskService, QObject *parent)
-    : TaskListViewModel(taskService, nullptr, parent)
-{
 }
 
 TaskListViewModel::TaskListViewModel(
     model::TaskService &taskService,
-    model::TaskCategoryService &categoryService,
-    QObject *parent)
-    : TaskListViewModel(taskService, &categoryService, parent)
-{
-}
-
-TaskListViewModel::TaskListViewModel(
-    model::TaskService &taskService,
-    model::TaskCategoryService *categoryService,
+    TaskPlanProjectionSource &planSource,
+    TaskCategoryProjectionSource &categorySource,
     QObject *parent)
     : TaskListContract(parent)
     , m_taskService(taskService)
-    , m_categoryService(categoryService)
-    , m_reloadTimer(this)
+    , m_planSource(planSource)
+    , m_categorySource(categorySource)
 {
-    // Service 是多个 ViewModel 共享的状态源；成功写入后的统一信号会触发
-    // 列表重建，无需让编辑器或 Widget 手动刷新本列表。
-    connect(&m_taskService, &model::TaskService::tasksChanged, this,
-            &TaskListViewModel::reload);
-    connect(&m_taskService, &model::TaskService::dependenciesChanged, this,
-            &TaskListViewModel::reload);
-    if (m_categoryService) {
-        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
-                this, &TaskListViewModel::reloadCategories);
-        connect(m_categoryService,
-                &model::TaskCategoryService::taskCategoryAssignmentsChanged,
-                this, &TaskListViewModel::reload);
-    }
-    connect(&m_reloadTimer, &QTimer::timeout, this, &TaskListViewModel::reload);
-    // 逾期与推荐理由依赖当前时间，分钟刷新只更新派生展示状态，不写入持久层。
-    m_reloadTimer.start(60'000);
-    reloadCategories();
-    reload();
+    connect(&m_planSource, &TaskPlanProjectionSource::projectionChanged,
+            this, &TaskListViewModel::applyPlanProjection);
+    connect(&m_planSource, &TaskPlanProjectionSource::refreshSucceeded,
+            this, &TaskListViewModel::syncSourceError);
+    connect(&m_planSource, &TaskPlanProjectionSource::refreshFailed,
+            this, &TaskListViewModel::syncSourceError);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::categoriesChanged,
+            this, &TaskListViewModel::applyCategories);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshSucceeded,
+            this, &TaskListViewModel::syncSourceError);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshFailed,
+            this, &TaskListViewModel::syncSourceError);
+    applyCategories();
+    applyPlanProjection();
+    syncSourceError();
 }
 
 int TaskListViewModel::rowCount(const QModelIndex &parent) const
@@ -101,17 +81,17 @@ QVariant TaskListViewModel::data(const QModelIndex &index, const int role) const
     case ArchivedRole:
         return task.status() == model::TaskStatus::Archived;
     case OverdueRole:
-        return m_overdueStates.value(task.id(), false);
+        return m_planSource.projection().overdueStates.value(task.id(), false);
     case OrderReasonTextRole:
-        return m_orderReasonTexts.value(task.id());
+        return m_planSource.projection().orderReasonTexts.value(task.id());
     case BlockedRole:
-        return m_dependencyProjections.value(task.id()).blocked;
+        return m_planSource.projection().dependencyProjections.value(task.id()).blocked;
     case BlockingReasonTextRole:
-        return m_dependencyProjections.value(task.id()).blockingReasonText;
+        return m_planSource.projection().dependencyProjections.value(task.id()).blockingReasonText;
     case PredecessorCountRole:
-        return m_dependencyProjections.value(task.id()).predecessorCount;
+        return m_planSource.projection().dependencyProjections.value(task.id()).predecessorCount;
     case UnlockCountRole:
-        return m_dependencyProjections.value(task.id()).unlockCount;
+        return m_planSource.projection().dependencyProjections.value(task.id()).unlockCount;
     case CanEditTaskRole:
         return availabilityFor(task.id()).canEditTask;
     case CanEditDependenciesRole:
@@ -212,8 +192,9 @@ QStringList TaskListViewModel::priorityFilterOptions() const
 
 QVariantList TaskListViewModel::categoryFilterOptions() const
 {
+    const auto &categories = m_categorySource.categories();
     QVariantList options;
-    options.reserve(m_categories.size() + 2);
+    options.reserve(categories.size() + 2);
     options.append(QVariantMap{{QStringLiteral("mode"), 0},
                                {QStringLiteral("categoryId"), QString{}},
                                {QStringLiteral("name"), QStringLiteral("全部类别")},
@@ -222,7 +203,7 @@ QVariantList TaskListViewModel::categoryFilterOptions() const
                                {QStringLiteral("categoryId"), QString{}},
                                {QStringLiteral("name"), QStringLiteral("未分类")},
                                {QStringLiteral("accent"), taskUncategorizedAccent()}});
-    for (const auto &category : m_categories) {
+    for (const auto &category : categories) {
         options.append(QVariantMap{
             {QStringLiteral("mode"), 2},
             {QStringLiteral("categoryId"), category.id.toString(QUuid::WithoutBraces)},
@@ -356,8 +337,9 @@ bool TaskListViewModel::setCategoryFilter(const int mode,
     model::TaskCategoryId id;
     if (mode == 2) {
         id = QUuid::fromString(categoryId.trimmed());
+        const auto &categories = m_categorySource.categories();
         const bool exists = std::any_of(
-            m_categories.cbegin(), m_categories.cend(),
+            categories.cbegin(), categories.cend(),
             [&id](const auto &category) { return category.id == id; });
         if (id.isNull() || !exists) return false;
     }
@@ -376,29 +358,7 @@ bool TaskListViewModel::setCategoryFilter(const int mode,
 
 void TaskListViewModel::reload()
 {
-    const auto result = m_taskService.listRecommendedTasks();
-    if (!result.ok()) {
-        setError(taskErrorMessage(result.error));
-        return;
-    }
-
-    setError({});
-    TaskPlanProjection projection = makeTaskPlanProjection(*result.value);
-    // 分钟定时刷新若没有产生新顺序或理由，不重置 Qt 模型，避免列表滚动位置跳动。
-    if (m_allTasks == projection.tasks
-        && m_orderReasonTexts == projection.orderReasonTexts
-        && m_overdueStates == projection.overdueStates
-        && m_dependencyProjections == projection.dependencyProjections
-        && m_availabilities == projection.availabilities) {
-        return;
-    }
-
-    m_allTasks = std::move(projection.tasks);
-    m_orderReasonTexts = std::move(projection.orderReasonTexts);
-    m_overdueStates = std::move(projection.overdueStates);
-    m_dependencyProjections = std::move(projection.dependencyProjections);
-    m_availabilities = std::move(projection.availabilities);
-    rebuildVisibleTasks();
+    m_planSource.refresh();
 }
 
 void TaskListViewModel::clearFilters()
@@ -666,18 +626,18 @@ const model::Task *TaskListViewModel::taskForId(
     if (taskId.isNull()) {
         return nullptr;
     }
+    const auto &tasks = m_planSource.projection().tasks;
     const auto iterator = std::find_if(
-        m_allTasks.cbegin(), m_allTasks.cend(), [&taskId](const model::Task &task) {
+        tasks.cbegin(), tasks.cend(), [&taskId](const model::Task &task) {
             return task.id() == taskId;
         });
-    return iterator == m_allTasks.cend() ? nullptr : &*iterator;
+    return iterator == tasks.cend() ? nullptr : &*iterator;
 }
 
 const model::TaskCommandAvailability &TaskListViewModel::availabilityFor(
     const model::TaskId &taskId) const
 {
-    const auto iterator = m_availabilities.constFind(taskId);
-    return iterator == m_availabilities.cend() ? emptyAvailability : iterator.value();
+    return m_planSource.projection().availabilityFor(taskId);
 }
 
 bool TaskListViewModel::isBulkSelectable(const model::TaskId &taskId) const
@@ -756,12 +716,13 @@ void TaskListViewModel::setBulkSelection(QSet<model::TaskId> selection)
 
 void TaskListViewModel::rebuildVisibleTasks()
 {
+    const auto &tasks = m_planSource.projection().tasks;
     // 整批替换投影时遵循 QAbstractItemModel 的重置协议，使 Widget 安全重建行绑定。
     beginResetModel();
     m_visibleTasks.clear();
-    m_visibleTasks.reserve(m_allTasks.size());
+    m_visibleTasks.reserve(tasks.size());
     m_visibleTaskIds.clear();
-    m_visibleTaskIds.reserve(m_allTasks.size());
+    m_visibleTaskIds.reserve(tasks.size());
 
     const QString keyword = m_searchText.trimmed();
     const bool filtersPriority =
@@ -769,7 +730,7 @@ void TaskListViewModel::rebuildVisibleTasks()
     const auto selectedPriority = taskPriorityFromIndex(
         m_priorityFilterIndex - firstPriorityFilterIndex);
 
-    for (const auto &task : m_allTasks) {
+    for (const auto &task : tasks) {
         const bool archived = task.status() == model::TaskStatus::Archived;
         if (archived != m_showArchived) {
             continue;
@@ -804,23 +765,19 @@ void TaskListViewModel::rebuildVisibleTasks()
     emit bulkSelectionChanged();
 }
 
-void TaskListViewModel::reloadCategories()
+void TaskListViewModel::applyPlanProjection()
 {
-    QList<model::TaskCategory> categories;
-    if (m_categoryService) {
-        const auto result = m_categoryService->listCategories();
-        if (!result.ok()) {
-            setError(QStringLiteral("类别数据访问失败，请稍后重试。"));
-            return;
-        }
-        categories = *result.value;
-    }
-    m_categories = std::move(categories);
+    rebuildVisibleTasks();
+}
+
+void TaskListViewModel::applyCategories()
+{
     emit categoryOptionsChanged();
 
     if (m_categoryFilterMode == 2) {
+        const auto &categories = m_categorySource.categories();
         const bool exists = std::any_of(
-            m_categories.cbegin(), m_categories.cend(),
+            categories.cbegin(), categories.cend(),
             [this](const auto &category) {
                 return category.id == m_categoryFilterCategoryId;
             });
@@ -836,15 +793,29 @@ void TaskListViewModel::reloadCategories()
     rebuildVisibleTasks();
 }
 
+void TaskListViewModel::syncSourceError()
+{
+    if (m_planSource.lastError() != model::TaskError::None) {
+        setError(taskErrorMessage(m_planSource.lastError()));
+        return;
+    }
+    if (m_categorySource.lastError() != model::TaskCategoryError::None) {
+        setError(QStringLiteral("类别数据访问失败，请稍后重试。"));
+        return;
+    }
+    setError({});
+}
+
 const model::TaskCategory *TaskListViewModel::categoryForTask(
     const model::Task *task) const
 {
     if (!task || !task->categoryId().has_value()) return nullptr;
+    const auto &categories = m_categorySource.categories();
     const auto iterator = std::find_if(
-        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+        categories.cbegin(), categories.cend(), [&](const auto &category) {
             return category.id == *task->categoryId();
         });
-    return iterator == m_categories.cend() ? nullptr : &*iterator;
+    return iterator == categories.cend() ? nullptr : &*iterator;
 }
 
 void TaskListViewModel::setError(const QString &message)

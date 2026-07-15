@@ -35,7 +35,8 @@ void TaskViewModelsTest::dependencyDraftCancelDoesNotChangeModel()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskDependencyViewModel editor{service};
+    ProjectionSources sources{service};
+    TaskDependencyViewModel editor{service, sources.categories};
 
     QVERIFY(editor.beginEdit(target.id().toString(QUuid::WithoutBraces)));
     // 已取消任务不得作为新候选，但已有取消关系必须继续显示并允许移除。
@@ -103,7 +104,8 @@ void TaskViewModelsTest::dependencyDraftSavesStableTaskIds()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskDependencyViewModel editor{service};
+    ProjectionSources sources{service};
+    TaskDependencyViewModel editor{service, sources.categories};
     QSignalSpy savedSpy{&editor, &TaskDependencyViewModel::saved};
 
     QVERIFY(editor.beginEdit(target.id().toString(QUuid::WithoutBraces)));
@@ -153,7 +155,8 @@ void TaskViewModelsTest::dependencyDraftMapsCompleteCyclePath()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskDependencyViewModel editor{service};
+    ProjectionSources sources{service};
+    TaskDependencyViewModel editor{service, sources.categories};
 
     QVERIFY(editor.beginEdit(first.id().toString(QUuid::WithoutBraces)));
     QVERIFY(editor.setPredecessorSelected(

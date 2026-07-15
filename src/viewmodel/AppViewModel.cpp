@@ -4,13 +4,15 @@ namespace smartmate::viewmodel {
 
 AppViewModel::AppViewModel(model::TaskService &taskService, QObject *parent)
     : QObject(parent)
-    , m_taskCategories(taskService)
-    , m_taskList(taskService)
-    , m_taskFocus(taskService)
-    , m_taskDetails(taskService)
-    , m_taskEditor(taskService)
-    , m_taskDependencies(new TaskDependencyViewModel(taskService, this))
-    , m_taskGraph(taskService)
+    , m_taskPlanSource(taskService)
+    , m_taskCategorySource()
+    , m_taskCategories(nullptr, m_taskPlanSource, m_taskCategorySource)
+    , m_taskList(taskService, m_taskPlanSource, m_taskCategorySource)
+    , m_taskFocus(m_taskPlanSource, m_taskCategorySource)
+    , m_taskDetails(m_taskPlanSource, m_taskCategorySource)
+    , m_taskEditor(taskService, m_taskCategorySource)
+    , m_taskDependencies(taskService, m_taskCategorySource)
+    , m_taskGraph(taskService, m_taskCategorySource)
     , m_appearanceSettings()
 {
 }
@@ -19,13 +21,15 @@ AppViewModel::AppViewModel(model::TaskService &taskService,
                            model::AppearanceSettingsService &appearanceService,
                            QObject *parent)
     : QObject(parent)
-    , m_taskCategories(taskService)
-    , m_taskList(taskService)
-    , m_taskFocus(taskService)
-    , m_taskDetails(taskService)
-    , m_taskEditor(taskService)
-    , m_taskDependencies(new TaskDependencyViewModel(taskService, this))
-    , m_taskGraph(taskService)
+    , m_taskPlanSource(taskService)
+    , m_taskCategorySource()
+    , m_taskCategories(nullptr, m_taskPlanSource, m_taskCategorySource)
+    , m_taskList(taskService, m_taskPlanSource, m_taskCategorySource)
+    , m_taskFocus(m_taskPlanSource, m_taskCategorySource)
+    , m_taskDetails(m_taskPlanSource, m_taskCategorySource)
+    , m_taskEditor(taskService, m_taskCategorySource)
+    , m_taskDependencies(taskService, m_taskCategorySource)
+    , m_taskGraph(taskService, m_taskCategorySource)
     , m_appearanceSettings(appearanceService)
 {
 }
@@ -34,14 +38,15 @@ AppViewModel::AppViewModel(model::TaskService &taskService,
                            model::TaskCategoryService &categoryService,
                            QObject *parent)
     : QObject(parent)
-    , m_taskCategories(taskService, &categoryService)
-    , m_taskList(taskService, categoryService)
-    , m_taskFocus(taskService, categoryService)
-    , m_taskDetails(taskService, categoryService)
-    , m_taskEditor(taskService, categoryService)
-    , m_taskDependencies(new TaskDependencyViewModel(
-          taskService, categoryService, this))
-    , m_taskGraph(taskService, categoryService)
+    , m_taskPlanSource(taskService, &categoryService)
+    , m_taskCategorySource(&categoryService)
+    , m_taskCategories(&categoryService, m_taskPlanSource, m_taskCategorySource)
+    , m_taskList(taskService, m_taskPlanSource, m_taskCategorySource)
+    , m_taskFocus(m_taskPlanSource, m_taskCategorySource)
+    , m_taskDetails(m_taskPlanSource, m_taskCategorySource)
+    , m_taskEditor(taskService, m_taskCategorySource)
+    , m_taskDependencies(taskService, m_taskCategorySource)
+    , m_taskGraph(taskService, m_taskCategorySource)
     , m_appearanceSettings()
 {
 }
@@ -51,17 +56,18 @@ AppViewModel::AppViewModel(model::TaskService &taskService,
                            model::AppearanceSettingsService &appearanceService,
                            QObject *parent)
     : QObject(parent)
-    , m_taskCategories(taskService, &categoryService)
-    , m_taskList(taskService, categoryService)
-    , m_taskFocus(taskService, categoryService)
-    , m_taskDetails(taskService, categoryService)
-    , m_taskEditor(taskService, categoryService)
-    , m_taskDependencies(new TaskDependencyViewModel(
-          taskService, categoryService, this))
-    , m_taskGraph(taskService, categoryService)
+    , m_taskPlanSource(taskService, &categoryService)
+    , m_taskCategorySource(&categoryService)
+    , m_taskCategories(&categoryService, m_taskPlanSource, m_taskCategorySource)
+    , m_taskList(taskService, m_taskPlanSource, m_taskCategorySource)
+    , m_taskFocus(m_taskPlanSource, m_taskCategorySource)
+    , m_taskDetails(m_taskPlanSource, m_taskCategorySource)
+    , m_taskEditor(taskService, m_taskCategorySource)
+    , m_taskDependencies(taskService, m_taskCategorySource)
+    , m_taskGraph(taskService, m_taskCategorySource)
     , m_appearanceSettings(appearanceService)
 {
-    // 子 ViewModel 共享 Service，但没有相互引用；跨投影同步完全依靠 Service 失效通知。
+    // 子 ViewModel 不相互引用；计划与类别展示通过显式注入的共享源同步。
 }
 
 TaskListViewModel *AppViewModel::taskList() noexcept
@@ -86,8 +92,7 @@ TaskEditorViewModel *AppViewModel::taskEditor() noexcept
 
 TaskDependencyViewModel *AppViewModel::taskDependencies() noexcept
 {
-    // 指针由 QObject 父子关系管理；返回仅用于向 Widget 注入 TaskDependencyContract。
-    return m_taskDependencies;
+    return &m_taskDependencies;
 }
 
 TaskGraphViewModel *AppViewModel::taskGraph() noexcept

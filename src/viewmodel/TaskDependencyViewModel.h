@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Task.h"
+#include "TaskProjectionSources.h"
 #include "services/TaskResult.h"
 #include "viewmodel/contracts/TaskDependencyContract.h"
 
@@ -9,7 +10,6 @@
 
 namespace smartmate::model {
 class TaskService;
-class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -22,10 +22,8 @@ class TaskDependencyViewModel final : public TaskDependencyContract {
     Q_OBJECT
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
 public:
-    explicit TaskDependencyViewModel(model::TaskService &taskService,
-                                     QObject *parent = nullptr);
     TaskDependencyViewModel(model::TaskService &taskService,
-                            model::TaskCategoryService &categoryService,
+                            TaskCategoryProjectionSource &categorySource,
                             QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
@@ -67,20 +65,13 @@ private:
     /// 去重错误属性通知，并把非空错误发布为 UiNotification。
     void setErrorMessage(const QString &message);
     /// 类别目录变化时只刷新类别展示 Role，不重建依赖资格。
-    void reloadCategories();
+    void applyCategories();
     [[nodiscard]] const model::TaskCategory *categoryForTask(
         const model::Task &task) const;
 
-    TaskDependencyViewModel(model::TaskService &taskService,
-                            model::TaskCategoryService *categoryService,
-                            QObject *parent);
-
     /// 非拥有引用；组合根保证 Service 生命周期长于本 ViewModel。
     model::TaskService &m_taskService;
-    /// 非拥有可选指针；nullptr 表示隔离测试不投影类别。
-    model::TaskCategoryService *m_categoryService{nullptr};
-    /// 类别展示快照，仅用于候选名称和强调色。
-    QList<model::TaskCategory> m_categories;
+    TaskCategoryProjectionSource &m_categorySource;
     /// 当前依赖编辑目标及标题，来自 Model 编辑上下文。
     model::TaskId m_taskId;
     QString m_taskTitle;

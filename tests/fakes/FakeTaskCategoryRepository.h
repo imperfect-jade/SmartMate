@@ -21,6 +21,7 @@ public:
 
     [[nodiscard]] QList<model::TaskCategory> findAllCategories() const override
     {
+        ++m_findAllCount;
         throwIfReadFails();
         return m_categories;
     }
@@ -88,6 +89,7 @@ public:
     [[nodiscard]] int insertCount() const noexcept { return m_insertCount; }
     [[nodiscard]] int updateCount() const noexcept { return m_updateCount; }
     [[nodiscard]] int deleteCount() const noexcept { return m_deleteCount; }
+    [[nodiscard]] int findAllCount() const noexcept { return m_findAllCount; }
     [[nodiscard]] const QDateTime &lastDeletionTimeUtc() const noexcept
     {
         return m_lastDeletionTimeUtc;
@@ -123,6 +125,7 @@ private:
     int m_insertCount{0};
     int m_updateCount{0};
     int m_deleteCount{0};
+    mutable int m_findAllCount{0};
     bool m_failReads{false};
     bool m_failWrites{false};
 };

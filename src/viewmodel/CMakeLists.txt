@@ -13,6 +13,8 @@ add_library(smartmate_viewmodel STATIC
     TaskPresentationFormatter.cpp
     TaskPlanProjection.h
     TaskPlanProjection.cpp
+    TaskProjectionSources.h
+    TaskProjectionSources.cpp
     TaskCategoryPresentation.h
     TaskCategoryPresentation.cpp
     TaskCategoryViewModel.h

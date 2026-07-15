@@ -3,7 +3,6 @@
 #include "TaskErrorMapper.h"
 #include "TaskPresentationFormatter.h"
 #include "TaskCategoryPresentation.h"
-#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QUuid>
@@ -12,34 +11,16 @@
 
 namespace smartmate::viewmodel {
 
-TaskDependencyViewModel::TaskDependencyViewModel(model::TaskService &taskService,
-                                                 QObject *parent)
-    : TaskDependencyViewModel(taskService, nullptr, parent)
-{
-}
-
 TaskDependencyViewModel::TaskDependencyViewModel(
     model::TaskService &taskService,
-    model::TaskCategoryService &categoryService,
-    QObject *parent)
-    : TaskDependencyViewModel(taskService, &categoryService, parent)
-{
-}
-
-TaskDependencyViewModel::TaskDependencyViewModel(
-    model::TaskService &taskService,
-    model::TaskCategoryService *categoryService,
+    TaskCategoryProjectionSource &categorySource,
     QObject *parent)
     : TaskDependencyContract(parent)
     , m_taskService(taskService)
-    , m_categoryService(categoryService)
+    , m_categorySource(categorySource)
 {
-    // 类别变化只影响候选展示 Role；候选资格仍使用打开会话时的 Model 上下文。
-    if (m_categoryService) {
-        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
-                this, &TaskDependencyViewModel::reloadCategories);
-    }
-    reloadCategories();
+    connect(&m_categorySource, &TaskCategoryProjectionSource::categoriesChanged,
+            this, &TaskDependencyViewModel::applyCategories);
 }
 
 int TaskDependencyViewModel::rowCount(const QModelIndex &parent) const
@@ -346,12 +327,8 @@ void TaskDependencyViewModel::setErrorMessage(const QString &message)
     emit errorMessageChanged();
 }
 
-void TaskDependencyViewModel::reloadCategories()
+void TaskDependencyViewModel::applyCategories()
 {
-    if (!m_categoryService) return;
-    const auto result = m_categoryService->listCategories();
-    if (!result.ok()) return;
-    m_categories = *result.value;
     if (!m_candidates.isEmpty()) {
         emit dataChanged(index(0), index(m_candidates.size() - 1),
                          {CategoryNameRole, CategoryAccentRole, HasCategoryRole});
@@ -362,11 +339,12 @@ const model::TaskCategory *TaskDependencyViewModel::categoryForTask(
     const model::Task &task) const
 {
     if (!task.categoryId().has_value()) return nullptr;
+    const auto &categories = m_categorySource.categories();
     const auto iterator = std::find_if(
-        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+        categories.cbegin(), categories.cend(), [&](const auto &category) {
             return category.id == *task.categoryId();
         });
-    return iterator == m_categories.cend() ? nullptr : &*iterator;
+    return iterator == categories.cend() ? nullptr : &*iterator;
 }
 
 } // namespace smartmate::viewmodel

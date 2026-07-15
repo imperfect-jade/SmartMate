@@ -4,7 +4,6 @@
 #include "domain/TaskCategoryConstraints.h"
 #include "services/TaskCategoryResult.h"
 #include "services/TaskCategoryService.h"
-#include "services/TaskService.h"
 
 #include <QUuid>
 
@@ -35,24 +34,24 @@ namespace {
 } // namespace
 
 TaskCategoryViewModel::TaskCategoryViewModel(
-    model::TaskService &taskService,
     model::TaskCategoryService *categoryService,
+    TaskPlanProjectionSource &planSource,
+    TaskCategoryProjectionSource &categorySource,
     QObject *parent)
     : TaskCategoryContract(parent)
-    , m_taskService(taskService)
     , m_categoryService(categoryService)
+    , m_planSource(planSource)
+    , m_categorySource(categorySource)
 {
-    // 类别目录、任务计数和任务归属任一变化都会使聚合列表失效；ViewModel 独立重查。
-    if (m_categoryService) {
-        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
-                this, &TaskCategoryViewModel::reload);
-        connect(m_categoryService,
-                &model::TaskCategoryService::taskCategoryAssignmentsChanged,
-                this, &TaskCategoryViewModel::reload);
-    }
-    connect(&m_taskService, &model::TaskService::tasksChanged,
-            this, &TaskCategoryViewModel::reload);
-    reload();
+    connect(&m_planSource, &TaskPlanProjectionSource::projectionChanged,
+            this, &TaskCategoryViewModel::applyProjection);
+    connect(&m_planSource, &TaskPlanProjectionSource::refreshFailed,
+            this, &TaskCategoryViewModel::applyProjection);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::categoriesChanged,
+            this, &TaskCategoryViewModel::applyProjection);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshFailed,
+            this, &TaskCategoryViewModel::applyProjection);
+    applyProjection();
     beginCreate();
 }
 
@@ -136,31 +135,30 @@ void TaskCategoryViewModel::setDraftColorIndex(const int index)
 
 void TaskCategoryViewModel::reload()
 {
-    QList<model::TaskCategory> categories;
-    if (m_categoryService) {
-        const auto categoryResult = m_categoryService->listCategories();
-        if (!categoryResult.ok()) {
-            setErrorMessage(categoryErrorMessage(categoryResult.error));
-            return;
-        }
-        categories = *categoryResult.value;
-    }
+    m_planSource.refresh();
+    m_categorySource.refresh();
+    applyProjection();
+}
 
-    QHash<model::TaskCategoryId, int> counts;
-    const auto taskResult = m_taskService.listTasks();
-    if (!taskResult.ok()) {
-        // 删除确认依赖准确使用数；读取失败时保留旧投影，不能把未知误报为零。
+void TaskCategoryViewModel::applyProjection()
+{
+    if (m_categorySource.lastError() != model::TaskCategoryError::None) {
+        setErrorMessage(categoryErrorMessage(m_categorySource.lastError()));
+        return;
+    }
+    if (m_planSource.lastError() != model::TaskError::None) {
         setErrorMessage(QStringLiteral("任务数据访问失败，无法统计类别使用数量。"));
         return;
     }
-    for (const model::Task &task : *taskResult.value) {
+    QHash<model::TaskCategoryId, int> counts;
+    for (const model::Task &task : m_planSource.projection().tasks) {
         if (task.categoryId().has_value()) ++counts[*task.categoryId()];
     }
 
     setErrorMessage({});
     // 类别行和聚合计数必须在同一次模型重置中发布，Widget 不会观察到错配状态。
     beginResetModel();
-    m_categories = std::move(categories);
+    m_categories = m_categorySource.categories();
     m_taskCounts = std::move(counts);
     endResetModel();
     if (!m_editingCategoryId.isNull() && rowForCategory(m_editingCategoryId) < 0) {

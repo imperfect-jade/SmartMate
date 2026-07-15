@@ -4,7 +4,6 @@
 #include "TaskPresentationFormatter.h"
 #include "TaskCategoryPresentation.h"
 #include "TaskGraphProjectionModels.h"
-#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
@@ -24,26 +23,13 @@ QString stableId(const model::TaskId &id)
 
 } // namespace
 
-TaskGraphViewModel::TaskGraphViewModel(model::TaskService &taskService, QObject *parent)
-    : TaskGraphViewModel(taskService, nullptr, parent)
-{
-}
-
 TaskGraphViewModel::TaskGraphViewModel(
     model::TaskService &taskService,
-    model::TaskCategoryService &categoryService,
-    QObject *parent)
-    : TaskGraphViewModel(taskService, &categoryService, parent)
-{
-}
-
-TaskGraphViewModel::TaskGraphViewModel(
-    model::TaskService &taskService,
-    model::TaskCategoryService *categoryService,
+    TaskCategoryProjectionSource &categorySource,
     QObject *parent)
     : TaskGraphContract(parent)
     , m_taskService(taskService)
-    , m_categoryService(categoryService)
+    , m_categorySource(categorySource)
     , m_edges(new TaskGraphEdgeListModel(this))
     , m_selectedPredecessors(new TaskGraphRelationListModel(this))
     , m_selectedSuccessors(new TaskGraphRelationListModel(this))
@@ -54,14 +40,22 @@ TaskGraphViewModel::TaskGraphViewModel(
             this, &TaskGraphViewModel::reload);
     connect(&m_taskService, &model::TaskService::dependenciesChanged,
             this, &TaskGraphViewModel::reload);
-    if (m_categoryService) {
-        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
-                this, &TaskGraphViewModel::reloadCategories);
-        connect(m_categoryService,
-                &model::TaskCategoryService::taskCategoryAssignmentsChanged,
-                this, &TaskGraphViewModel::reload);
-    }
-    reloadCategories();
+    connect(&m_categorySource, &TaskCategoryProjectionSource::categoriesChanged,
+            this, &TaskGraphViewModel::applyCategories);
+    connect(&m_categorySource,
+            &TaskCategoryProjectionSource::taskCategoryAssignmentsChanged,
+            this, &TaskGraphViewModel::reload);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshFailed,
+            this, [this] {
+                setErrorMessage(QStringLiteral("类别数据访问失败，请稍后重试。"));
+            });
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshSucceeded,
+            this, [this] {
+                if (m_errorMessage
+                    == QStringLiteral("类别数据访问失败，请稍后重试。")) {
+                    setErrorMessage({});
+                }
+            });
     reload();
 }
 
@@ -138,7 +132,7 @@ QStringList TaskGraphViewModel::statusFilterOptions() const
 QVariantList TaskGraphViewModel::categoryFilterOptions() const
 {
     QVariantList options;
-    options.reserve(m_categories.size() + 2);
+    options.reserve(m_categorySource.categories().size() + 2);
     options.append(QVariantMap{{QStringLiteral("mode"), 0},
                                {QStringLiteral("categoryId"), QString{}},
                                {QStringLiteral("name"), QStringLiteral("全部类别")},
@@ -147,7 +141,7 @@ QVariantList TaskGraphViewModel::categoryFilterOptions() const
                                {QStringLiteral("categoryId"), QString{}},
                                {QStringLiteral("name"), QStringLiteral("未分类")},
                                {QStringLiteral("accent"), taskUncategorizedAccent()}});
-    for (const auto &category : m_categories) {
+    for (const auto &category : m_categorySource.categories()) {
         options.append(QVariantMap{
             {QStringLiteral("mode"), 2},
             {QStringLiteral("categoryId"), category.id.toString(QUuid::WithoutBraces)},
@@ -278,7 +272,8 @@ bool TaskGraphViewModel::setCategoryFilter(const int mode,
     if (mode == 2) {
         id = QUuid::fromString(categoryId.trimmed());
         const bool exists = std::any_of(
-            m_categories.cbegin(), m_categories.cend(),
+            m_categorySource.categories().cbegin(),
+            m_categorySource.categories().cend(),
             [&id](const auto &category) { return category.id == id; });
         if (id.isNull() || !exists) return false;
     }
@@ -497,23 +492,15 @@ void TaskGraphViewModel::setErrorMessage(const QString &message)
     emit errorMessageChanged();
 }
 
-void TaskGraphViewModel::reloadCategories()
+void TaskGraphViewModel::applyCategories()
 {
-    QList<model::TaskCategory> categories;
-    if (m_categoryService) {
-        const auto result = m_categoryService->listCategories();
-        if (!result.ok()) {
-            setErrorMessage(QStringLiteral("类别数据访问失败，请稍后重试。"));
-            return;
-        }
-        categories = *result.value;
-    }
-    m_categories = std::move(categories);
     emit categoryOptionsChanged();
 
+    bool filterInvalidated = false;
     if (m_categoryFilterMode == 2) {
+        const auto &categories = m_categorySource.categories();
         const bool exists = std::any_of(
-            m_categories.cbegin(), m_categories.cend(),
+            categories.cbegin(), categories.cend(),
             [this](const auto &category) {
                 return category.id == m_categoryFilterCategoryId;
             });
@@ -522,9 +509,15 @@ void TaskGraphViewModel::reloadCategories()
             m_categoryFilterMode = 1;
             m_categoryFilterCategoryId = model::TaskCategoryId{};
             emit categoryFilterChanged();
+            filterInvalidated = true;
         }
     }
-    reload();
+    if (!m_nodes.isEmpty()) {
+        emit dataChanged(index(0), index(m_nodes.size() - 1),
+                         {CategoryNameRole, CategoryAccentRole,
+                          HasCategoryRole});
+    }
+    if (filterInvalidated) reload();
     emit selectionChanged();
 }
 
@@ -532,11 +525,12 @@ const model::TaskCategory *TaskGraphViewModel::categoryForTask(
     const model::Task &task) const
 {
     if (!task.categoryId().has_value()) return nullptr;
+    const auto &categories = m_categorySource.categories();
     const auto iterator = std::find_if(
-        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+        categories.cbegin(), categories.cend(), [&](const auto &category) {
             return category.id == *task.categoryId();
         });
-    return iterator == m_categories.cend() ? nullptr : &*iterator;
+    return iterator == categories.cend() ? nullptr : &*iterator;
 }
 
 } // namespace smartmate::viewmodel

@@ -3,6 +3,7 @@
 #include "TaskEditorViewModel.h"
 #include "TaskGraphViewModel.h"
 #include "TaskListViewModel.h"
+#include "TaskProjectionSources.h"
 #include "TaskPresentationFormatter.h"
 #include "TaskFocusViewModel.h"
 #include "TaskDetailsViewModel.h"
@@ -55,8 +56,27 @@ using smartmate::viewmodel::TaskStatusVisual;
 using smartmate::viewmodel::TaskFocusViewModel;
 using smartmate::viewmodel::TaskDetailsViewModel;
 using smartmate::viewmodel::TaskCategoryViewModel;
+using smartmate::viewmodel::TaskCategoryProjectionSource;
+using smartmate::viewmodel::TaskPlanProjectionSource;
 
 namespace {
+
+struct ProjectionSources {
+    explicit ProjectionSources(TaskService &service,
+                               TaskCategoryService *categoryService = nullptr)
+        : plan(service, categoryService)
+        , categories(categoryService)
+    {
+    }
+
+    ProjectionSources(TaskService &service, TaskCategoryService &categoryService)
+        : ProjectionSources(service, &categoryService)
+    {
+    }
+
+    TaskPlanProjectionSource plan;
+    TaskCategoryProjectionSource categories;
+};
 
 // 各ViewModel测试只借用删除端口；端口生命周期覆盖全部局部Service。
 FakeTaskDeletionRepository deletionRepository;
@@ -234,10 +254,12 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
     FakeTaskRepository repository;
     FakeTaskDependencyRepository dependencyRepository;
     FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskCategoryRepository categories;
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
-                        categoryRepository};
-    AppViewModel app{service};
+                        categories};
+    TaskCategoryService categoryService{categories};
+    AppViewModel app{service, categoryService};
 
     QVERIFY(app.taskList() != nullptr);
     QVERIFY(app.taskFocus() != nullptr);
@@ -247,6 +269,8 @@ void TaskViewModelsTest::appViewModelOwnsBindableChildren()
     QVERIFY(app.taskGraph() != nullptr);
     QVERIFY(app.taskCategories() != nullptr);
     QVERIFY(app.appearanceSettings() != nullptr);
+    // 七个类别消费者共享 AppViewModel 持有的唯一目录读取源。
+    QCOMPARE(categories.findAllCount(), 1);
 }
 
 #include "tst_TaskListViewModel.inc"

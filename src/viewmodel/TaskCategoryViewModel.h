@@ -1,11 +1,11 @@
 #pragma once
 
 #include "domain/TaskCategory.h"
+#include "TaskProjectionSources.h"
 #include "viewmodel/contracts/TaskCategoryContract.h"
 
 
 namespace smartmate::model {
-class TaskService;
 class TaskCategoryService;
 }
 
@@ -20,8 +20,9 @@ class TaskCategoryViewModel final : public TaskCategoryContract {
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
 public:
     /// categoryService 可为空以兼容不加载类别功能的隔离测试；生产组合根必须注入。
-    explicit TaskCategoryViewModel(model::TaskService &taskService,
-                                   model::TaskCategoryService *categoryService = nullptr,
+    explicit TaskCategoryViewModel(model::TaskCategoryService *categoryService,
+                                   TaskPlanProjectionSource &planSource,
+                                   TaskCategoryProjectionSource &categorySource,
                                    QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
@@ -60,11 +61,13 @@ private:
     [[nodiscard]] QString categoryErrorText(int error) const;
     /// 去重错误属性通知，并为非空错误发布 UiNotification。
     void setErrorMessage(const QString &message);
+    /// 仅在两个共享源均有效时原子替换类别行与任务计数。
+    void applyProjection();
 
-    /// 非拥有任务 Service 引用，用于统计各类别关联任务数。
-    model::TaskService &m_taskService;
-    /// 非拥有指针；nullptr 仅用于旧的隔离测试构造路径。
+    /// 非拥有指针；nullptr 表示类别命令不可用的兼容模式。
     model::TaskCategoryService *m_categoryService{nullptr};
+    TaskPlanProjectionSource &m_planSource;
+    TaskCategoryProjectionSource &m_categorySource;
     /// 当前类别列表快照，是 QAbstractListModel Role 的数据源。
     QList<model::TaskCategory> m_categories;
     /// 按稳定类别 ID 缓存派生任务数量，不写回 Model。

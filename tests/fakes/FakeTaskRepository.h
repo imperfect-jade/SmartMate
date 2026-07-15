@@ -22,6 +22,7 @@ public:
 
     [[nodiscard]] QList<model::Task> findAll() const override
     {
+        ++m_findAllCount;
         throwIfReadFails();
         return m_tasks;
     }
@@ -93,6 +94,8 @@ public:
         return m_updateCount;
     }
 
+    [[nodiscard]] int findAllCount() const noexcept { return m_findAllCount; }
+
     /// 仅供原子创建 Fake 在第二阶段失败时撤销尚未对外成功的测试写入。
     void removeTaskForAtomicRollback(const model::TaskId &id)
     {
@@ -147,6 +150,7 @@ private:
     std::optional<model::Task> m_competingTaskOnNextWrite;
     int m_insertCount{0};
     int m_updateCount{0};
+    mutable int m_findAllCount{0};
     bool m_failReads{false};
     bool m_failWrites{false};
 };

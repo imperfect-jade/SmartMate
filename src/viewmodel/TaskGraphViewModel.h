@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/TaskGraph.h"
+#include "TaskProjectionSources.h"
 #include "TaskGraphLayout.h"
 #include "viewmodel/contracts/TaskGraphContract.h"
 
@@ -9,7 +10,6 @@
 
 namespace smartmate::model {
 class TaskService;
-class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -24,10 +24,8 @@ class TaskGraphViewModel final : public TaskGraphContract {
     Q_OBJECT
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
 public:
-    explicit TaskGraphViewModel(model::TaskService &taskService,
-                                QObject *parent = nullptr);
     TaskGraphViewModel(model::TaskService &taskService,
-                       model::TaskCategoryService &categoryService,
+                       TaskCategoryProjectionSource &categorySource,
                        QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
@@ -100,18 +98,13 @@ private:
     /// 去重错误属性通知并发布 UiNotification。
     void setErrorMessage(const QString &message);
     /// 类别变化时刷新筛选选项与节点类别展示，不重算业务关系。
-    void reloadCategories();
+    void applyCategories();
     [[nodiscard]] const model::TaskCategory *categoryForTask(
         const model::Task &task) const;
 
-    TaskGraphViewModel(model::TaskService &taskService,
-                       model::TaskCategoryService *categoryService,
-                       QObject *parent);
-
     /// 非拥有任务 Service 引用，是图领域快照的唯一来源。
     model::TaskService &m_taskService;
-    /// 非拥有可选类别 Service。
-    model::TaskCategoryService *m_categoryService{nullptr};
+    TaskCategoryProjectionSource &m_categorySource;
     /// QObject 子模型，父对象为本 ViewModel；指针地址供 Contract CONSTANT 属性稳定返回。
     TaskGraphEdgeListModel *m_edges;
     TaskGraphRelationListModel *m_selectedPredecessors;
@@ -129,8 +122,6 @@ private:
     /// 搜索和状态筛选只改变 FilterMatched/定位投影，不持久化。
     QString m_searchText;
     TaskGraphStatusFilter m_statusFilter{TaskGraphStatusFilter::All};
-    /// 类别展示及筛选选项快照。
-    QList<model::TaskCategory> m_categories;
     int m_categoryFilterMode{0};
     model::TaskCategoryId m_categoryFilterCategoryId;
     /// 布局内容尺寸，单位为场景像素。

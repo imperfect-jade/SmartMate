@@ -5,7 +5,6 @@
 #include "TaskCategoryPresentation.h"
 #include "domain/TaskConstraints.h"
 #include "domain/TaskCreationRequest.h"
-#include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 
 #include <QDateTime>
@@ -37,53 +36,39 @@ namespace {
 }
 }
 
-TaskEditorViewModel::TaskEditorViewModel(model::TaskService &taskService, QObject *parent)
-    : TaskEditorViewModel(taskService, nullptr, QTimeZone::systemTimeZone(), parent)
-{
-}
-
 TaskEditorViewModel::TaskEditorViewModel(
     model::TaskService &taskService,
-    model::TaskCategoryService &categoryService,
+    TaskCategoryProjectionSource &categorySource,
     QObject *parent)
-    : TaskEditorViewModel(taskService, &categoryService,
+    : TaskEditorViewModel(taskService, categorySource,
                           QTimeZone::systemTimeZone(), parent)
 {
 }
 
 TaskEditorViewModel::TaskEditorViewModel(model::TaskService &taskService,
+                                         TaskCategoryProjectionSource &categorySource,
                                          QTimeZone timeZone,
                                          QObject *parent)
-    : TaskEditorViewModel(taskService, nullptr, std::move(timeZone), parent)
-{
-}
-
-TaskEditorViewModel::TaskEditorViewModel(
-    model::TaskService &taskService,
-    model::TaskCategoryService &categoryService,
-    QTimeZone timeZone,
-    QObject *parent)
-    : TaskEditorViewModel(taskService, &categoryService, std::move(timeZone), parent)
-{
-}
-
-TaskEditorViewModel::TaskEditorViewModel(
-    model::TaskService &taskService,
-    model::TaskCategoryService *categoryService,
-    QTimeZone timeZone,
-    QObject *parent)
     : TaskEditorContract(parent)
     , m_taskService(taskService)
-    , m_categoryService(categoryService)
+    , m_categorySource(categorySource)
     , m_priorityIndex(taskPriorityIndex(model::TaskPriority::Normal))
     , m_timeZone(std::move(timeZone))
 {
-    // 类别目录变化只刷新类别选项和相关候选 Role，不让编辑器直接调用类别 ViewModel。
-    if (m_categoryService) {
-        connect(m_categoryService, &model::TaskCategoryService::categoriesChanged,
-                this, &TaskEditorViewModel::reloadCategories);
-    }
-    reloadCategories();
+    connect(&m_categorySource, &TaskCategoryProjectionSource::categoriesChanged,
+            this, &TaskEditorViewModel::applyCategories);
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshFailed,
+            this, [this] {
+                setErrorMessage(QStringLiteral("类别数据访问失败，请稍后重试。"));
+            });
+    connect(&m_categorySource, &TaskCategoryProjectionSource::refreshSucceeded,
+            this, [this] {
+                if (m_errorMessage
+                    == QStringLiteral("类别数据访问失败，请稍后重试。")) {
+                    setErrorMessage({});
+                }
+            });
+    applyCategories();
     rememberCurrentDraft();
     updateFormState();
 }
@@ -115,23 +100,26 @@ QVariant TaskEditorViewModel::data(const QModelIndex &index, const int role) con
     case CandidateCategoryNameRole: {
         if (!candidate.categoryId().has_value()) return QString{};
         const auto iterator = std::find_if(
-            m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+            m_categorySource.categories().cbegin(),
+            m_categorySource.categories().cend(), [&](const auto &category) {
                 return category.id == *candidate.categoryId();
             });
-        return iterator == m_categories.cend() ? QString{} : iterator->name;
+        return iterator == m_categorySource.categories().cend() ? QString{} : iterator->name;
     }
     case CandidateCategoryAccentRole: {
         if (!candidate.categoryId().has_value()) return QString{};
         const auto iterator = std::find_if(
-            m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+            m_categorySource.categories().cbegin(),
+            m_categorySource.categories().cend(), [&](const auto &category) {
                 return category.id == *candidate.categoryId();
             });
-        return iterator == m_categories.cend()
+        return iterator == m_categorySource.categories().cend()
             ? QString{} : taskCategoryAccent(iterator->color);
     }
     case CandidateHasCategoryRole: {
         if (!candidate.categoryId().has_value()) return false;
-        return std::any_of(m_categories.cbegin(), m_categories.cend(),
+        return std::any_of(m_categorySource.categories().cbegin(),
+                           m_categorySource.categories().cend(),
                            [&](const auto &category) {
                                return category.id == *candidate.categoryId();
                            });
@@ -328,11 +316,11 @@ QStringList TaskEditorViewModel::priorityOptions() const
 QVariantList TaskEditorViewModel::categoryOptions() const
 {
     QVariantList options;
-    options.reserve(m_categories.size() + 1);
+    options.reserve(m_categorySource.categories().size() + 1);
     options.append(QVariantMap{{QStringLiteral("categoryId"), QString{}},
                                {QStringLiteral("name"), QStringLiteral("未分类")},
                                {QStringLiteral("accent"), taskUncategorizedAccent()}});
-    for (const auto &category : m_categories) {
+    for (const auto &category : m_categorySource.categories()) {
         options.append(QVariantMap{
             {QStringLiteral("categoryId"), category.id.toString(QUuid::WithoutBraces)},
             {QStringLiteral("name"), category.name},
@@ -354,7 +342,8 @@ void TaskEditorViewModel::setSelectedCategoryId(const QString &categoryId)
     if (!trimmed.isEmpty()) {
         const model::TaskCategoryId id{QUuid::fromString(trimmed)};
         const bool exists = std::any_of(
-            m_categories.cbegin(), m_categories.cend(),
+            m_categorySource.categories().cbegin(),
+            m_categorySource.categories().cend(),
             [&id](const auto &category) { return category.id == id; });
         if (id.isNull() || !exists) {
             setErrorMessage(QStringLiteral("所选类别不存在或已被删除。"));
@@ -373,10 +362,11 @@ const model::TaskCategory *TaskEditorViewModel::selectedCategory() const
 {
     if (!m_categoryId.has_value()) return nullptr;
     const auto iterator = std::find_if(
-        m_categories.cbegin(), m_categories.cend(), [&](const auto &category) {
+        m_categorySource.categories().cbegin(),
+        m_categorySource.categories().cend(), [&](const auto &category) {
             return category.id == *m_categoryId;
         });
-    return iterator == m_categories.cend() ? nullptr : &*iterator;
+    return iterator == m_categorySource.categories().cend() ? nullptr : &*iterator;
 }
 
 QString TaskEditorViewModel::selectedCategoryName() const
@@ -893,18 +883,8 @@ int TaskEditorViewModel::candidateRow(const model::TaskId &taskId) const
     return -1;
 }
 
-void TaskEditorViewModel::reloadCategories()
+void TaskEditorViewModel::applyCategories()
 {
-    QList<model::TaskCategory> categories;
-    if (m_categoryService) {
-        const auto result = m_categoryService->listCategories();
-        if (!result.ok()) {
-            setErrorMessage(QStringLiteral("类别数据访问失败，请稍后重试。"));
-            return;
-        }
-        categories = *result.value;
-    }
-    m_categories = std::move(categories);
     emit categoryOptionsChanged();
 
     // 若数据库中的原类别已被管理命令删除，持久化快照已经自动转为未分类；
@@ -912,7 +892,8 @@ void TaskEditorViewModel::reloadCategories()
     if (m_editMode && m_original.categoryId.has_value()) {
         const auto originalId = *m_original.categoryId;
         const bool originalStillExists = std::any_of(
-            m_categories.cbegin(), m_categories.cend(),
+            m_categorySource.categories().cbegin(),
+            m_categorySource.categories().cend(),
             [&originalId](const auto &category) {
                 return category.id == originalId;
             });

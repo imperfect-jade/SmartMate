@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Task.h"
+#include "TaskProjectionSources.h"
 #include "viewmodel/contracts/TaskEditorContract.h"
 
 #include <QDateTime>
@@ -14,7 +15,6 @@
 
 namespace smartmate::model {
 class TaskService;
-class TaskCategoryService;
 }
 
 namespace smartmate::viewmodel {
@@ -27,16 +27,12 @@ class TaskEditorViewModel final : public TaskEditorContract {
     Q_OBJECT
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
 public:
-    explicit TaskEditorViewModel(model::TaskService &taskService, QObject *parent = nullptr);
     TaskEditorViewModel(model::TaskService &taskService,
-                        model::TaskCategoryService &categoryService,
+                        TaskCategoryProjectionSource &categorySource,
                         QObject *parent = nullptr);
     /// 注入时区供测试和确定性显示使用；生产环境默认使用系统时区。
     TaskEditorViewModel(model::TaskService &taskService,
-                        QTimeZone timeZone,
-                        QObject *parent = nullptr);
-    TaskEditorViewModel(model::TaskService &taskService,
-                        model::TaskCategoryService &categoryService,
+                        TaskCategoryProjectionSource &categorySource,
                         QTimeZone timeZone,
                         QObject *parent = nullptr);
 
@@ -157,18 +153,12 @@ private:
     [[nodiscard]] std::optional<QDateTime> displayedDeadline() const;
     [[nodiscard]] int candidateRow(const model::TaskId &taskId) const;
     /// 刷新类别选项，并安全处理编辑期间类别被外部删除的情况。
-    void reloadCategories();
+    void applyCategories();
     [[nodiscard]] const model::TaskCategory *selectedCategory() const;
-
-    TaskEditorViewModel(model::TaskService &taskService,
-                        model::TaskCategoryService *categoryService,
-                        QTimeZone timeZone,
-                        QObject *parent);
 
     // 非拥有的应用服务引用。
     model::TaskService &m_taskService;
-    /// 非拥有指针；生产组合根注入，nullptr仅供旧隔离测试维持无类别模式。
-    model::TaskCategoryService *m_categoryService{nullptr};
+    TaskCategoryProjectionSource &m_categorySource;
     // 当前可编辑草稿采用表单友好形态，便于与 Qt Widgets 显式双向绑定。
     QString m_taskId;
     bool m_editMode{false};
@@ -184,7 +174,6 @@ private:
     /// Model 使用的总分钟数，界面仅将其投影为天、小时和分钟。
     std::optional<int> m_estimatedMinutes;
     std::optional<model::TaskCategoryId> m_categoryId;
-    QList<model::TaskCategory> m_categories;
     /// 解释日历和时钟选择的时区，生产环境为系统时区。
     QTimeZone m_timeZone;
     // 原始快照和由草稿推导出的界面状态。

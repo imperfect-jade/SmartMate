@@ -20,7 +20,8 @@ void TaskViewModelsTest::graphProjectsNodesEdgesAndSelectionDetails()
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskGraphViewModel graph{service};
+    ProjectionSources sources{service};
+    TaskGraphViewModel graph{service, sources.categories};
 
     QCOMPARE(graph.rowCount(), 3);
     QCOMPARE(graph.statusFilterOptions(),
@@ -152,7 +153,8 @@ void TaskViewModelsTest::graphMinimizesSimpleLayerCrossing()
     TaskService service{repository, dependencies, creation,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskGraphViewModel graph{service};
+    ProjectionSources sources{service};
+    TaskGraphViewModel graph{service, sources.categories};
 
     const auto xFor = [&graph](const Task &value) {
         const int row = graphRowForId(graph, value.id().toString(QUuid::WithoutBraces));
@@ -178,8 +180,9 @@ void TaskViewModelsTest::graphRoutesLongEdgesDeterministically()
     TaskService service{repository, dependencies, creation,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskGraphViewModel firstProjection{service};
-    TaskGraphViewModel secondProjection{service};
+    ProjectionSources sources{service};
+    TaskGraphViewModel firstProjection{service, sources.categories};
+    TaskGraphViewModel secondProjection{service, sources.categories};
 
     QAbstractItemModel *firstEdges = firstProjection.edges();
     QAbstractItemModel *secondEdges = secondProjection.edges();
@@ -226,7 +229,8 @@ void TaskViewModelsTest::graphReloadPreservesVisibleSelectionAndClearsHiddenSele
     TaskService service{repository, dependencyRepository, creationRepository,
                         batchTransitionsFor(repository), deletionRepository,
                         categoryRepository};
-    TaskGraphViewModel graph{service};
+    ProjectionSources sources{service};
+    TaskGraphViewModel graph{service, sources.categories};
 
     const QString successorId = successor.id().toString(QUuid::WithoutBraces);
     QVERIFY(graph.selectTask(successorId));

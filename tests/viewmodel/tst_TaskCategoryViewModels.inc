@@ -17,7 +17,9 @@ void TaskViewModelsTest::categoryViewModelProjectsCrudAndUsageCounts()
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskCategoryViewModel viewModel{service, &categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskCategoryViewModel viewModel{&categoryService, sources.plan,
+                                    sources.categories};
 
     QCOMPARE(viewModel.count(), 1);
     QCOMPARE(viewModel.data(viewModel.index(0),
@@ -58,7 +60,8 @@ void TaskViewModelsTest::categoryDeletionKeepsOpenEditorDraftClean()
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskEditorViewModel editor{service, categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskEditorViewModel editor{service, sources.categories};
 
     QVERIFY(editor.beginEdit(
         repository.tasks().constFirst().id().toString(QUuid::WithoutBraces)));
@@ -94,7 +97,9 @@ void TaskViewModelsTest::categoryViewModelRetainsUsageCountsWhenTaskReadFails()
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskCategoryViewModel viewModel{service, &categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskCategoryViewModel viewModel{&categoryService, sources.plan,
+                                    sources.categories};
 
     QCOMPARE(viewModel.count(), 1);
     QCOMPARE(viewModel.data(viewModel.index(0),
@@ -128,7 +133,8 @@ void TaskViewModelsTest::editorPersistsStableCategorySelection()
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskEditorViewModel editor{service, categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskEditorViewModel editor{service, sources.categories};
 
     QVERIFY(editor.beginCreate());
     QCOMPARE(editor.categoryOptions().size(), 2);
@@ -168,7 +174,8 @@ void TaskViewModelsTest::listCombinesCategoryWithExistingFilters()
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskListViewModel viewModel{service, categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskListViewModel viewModel{service, sources.plan, sources.categories};
 
     QVERIFY(viewModel.setCategoryFilter(2, work.id.toString(QUuid::WithoutBraces)));
     QCOMPARE(viewModel.count(), 1);
@@ -214,7 +221,8 @@ void TaskViewModelsTest::graphProjectsCoreAndCrossCategoryContext()
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskGraphViewModel graph{service, categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskGraphViewModel graph{service, sources.categories};
 
     QVERIFY(graph.setCategoryFilter(2, work.id.toString(QUuid::WithoutBraces)));
     QCOMPARE(graph.rowCount(), 2);
@@ -231,6 +239,16 @@ void TaskViewModelsTest::graphProjectsCoreAndCrossCategoryContext()
                         TaskGraphViewModel::CategoryNameRole).toString(),
              QStringLiteral("学习"));
     QCOMPARE(graph.edges()->rowCount(), 1);
+
+    const int taskReadsBeforeRename = repository.findAllCount();
+    smartmate::model::TaskCategoryDraft renamedStudy;
+    renamedStudy.name = QStringLiteral("进修");
+    renamedStudy.color = TaskCategoryColor::Violet;
+    QVERIFY(categoryService.updateCategory(study.id, renamedStudy).ok());
+    QCOMPARE(repository.findAllCount(), taskReadsBeforeRename);
+    QCOMPARE(graph.data(graph.index(contextRow),
+                        TaskGraphViewModel::CategoryNameRole).toString(),
+             QStringLiteral("进修"));
 }
 
 void TaskViewModelsTest::graphCategoryFilterFailureRetainsPreviousStateAndSnapshot()
@@ -253,7 +271,8 @@ void TaskViewModelsTest::graphCategoryFilterFailureRetainsPreviousStateAndSnapsh
                         batchTransitionsFor(repository), deletionRepository,
                         categories};
     TaskCategoryService categoryService{categories};
-    TaskGraphViewModel graph{service, categoryService};
+    ProjectionSources sources{service, categoryService};
+    TaskGraphViewModel graph{service, sources.categories};
 
     QCOMPARE(graph.categoryFilterMode(), 0);
     QCOMPARE(graph.rowCount(), 2);

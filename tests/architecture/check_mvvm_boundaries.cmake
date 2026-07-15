@@ -172,6 +172,50 @@ foreach(split_viewmodel IN ITEMS TaskFocusViewModel TaskDetailsViewModel)
     endif()
 endforeach()
 
+# 计划与类别目录必须只有一个 Service 查询入口；共享源由 AppViewModel 显式拥有，
+# 不能退化为全局缓存、Service Locator 或各消费者再次独立查询。
+set(projection_source "${ROOT_DIR}/src/viewmodel/TaskProjectionSources.cpp")
+if(NOT EXISTS "${projection_source}")
+    record_violation("${ROOT_DIR}/src/viewmodel/CMakeLists.txt"
+        "Shared task projection sources are required")
+endif()
+
+file(GLOB task_viewmodel_sources LIST_DIRECTORIES FALSE
+    "${ROOT_DIR}/src/viewmodel/Task*ViewModel.cpp")
+foreach(source_file IN LISTS task_viewmodel_sources)
+    file(READ "${source_file}" source_contents)
+    if(source_contents MATCHES "listRecommendedTasks" OR source_contents MATCHES "listCategories")
+        record_violation("${source_file}"
+            "Concrete task ViewModels must consume shared projection sources instead of duplicating Service queries")
+    endif()
+endforeach()
+
+foreach(timer_owner IN ITEMS TaskListViewModel TaskFocusViewModel)
+    set(timer_header "${ROOT_DIR}/src/viewmodel/${timer_owner}.h")
+    if(EXISTS "${timer_header}")
+        file(READ "${timer_header}" timer_contents)
+        if(timer_contents MATCHES "QTimer")
+            record_violation("${timer_header}"
+                "The minute refresh timer must be owned only by TaskPlanProjectionSource")
+        endif()
+    endif()
+endforeach()
+
+set(app_viewmodel_header "${ROOT_DIR}/src/viewmodel/AppViewModel.h")
+if(EXISTS "${app_viewmodel_header}")
+    file(READ "${app_viewmodel_header}" app_viewmodel_contents)
+    string(FIND "${app_viewmodel_contents}" "TaskPlanProjectionSource m_taskPlanSource" plan_source_position)
+    string(FIND "${app_viewmodel_contents}" "TaskCategoryProjectionSource m_taskCategorySource" category_source_position)
+    string(FIND "${app_viewmodel_contents}" "TaskListViewModel m_taskList" first_consumer_position)
+    if(plan_source_position LESS 0 OR category_source_position LESS 0
+       OR first_consumer_position LESS 0
+       OR plan_source_position GREATER first_consumer_position
+       OR category_source_position GREATER first_consumer_position)
+        record_violation("${app_viewmodel_header}"
+            "AppViewModel must own both projection sources before their consumers")
+    endif()
+endif()
+
 set(viewmodel_cmake "${ROOT_DIR}/src/viewmodel/CMakeLists.txt")
 if(EXISTS "${viewmodel_cmake}")
     file(READ "${viewmodel_cmake}" viewmodel_cmake_contents)

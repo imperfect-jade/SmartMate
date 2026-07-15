@@ -3,13 +3,12 @@
 #include "domain/Task.h"
 #include "domain/TaskStateMachine.h"
 #include "planner/TaskOrderingPolicy.h"
-#include "TaskPlanProjection.h"
+#include "TaskProjectionSources.h"
 #include "viewmodel/contracts/TaskListContract.h"
 
 #include <QHash>
 #include <QSet>
 #include <QStringList>
-#include <QTimer>
 #include <QVariantList>
 
 namespace smartmate::model {
@@ -26,9 +25,9 @@ class TaskListViewModel final : public TaskListContract {
     Q_OBJECT
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
 public:
-    explicit TaskListViewModel(model::TaskService &taskService, QObject *parent = nullptr);
     TaskListViewModel(model::TaskService &taskService,
-                      model::TaskCategoryService &categoryService,
+                      TaskPlanProjectionSource &planSource,
+                      TaskCategoryProjectionSource &categorySource,
                       QObject *parent = nullptr);
 
     [[nodiscard]] int rowCount(const QModelIndex &parent = {}) const override;
@@ -117,33 +116,20 @@ private:
     void rebuildVisibleTasks();
     /// 去重错误属性与流程通知。
     void setError(const QString &message);
-    /// 刷新类别选项；失效的指定类别筛选安全回退为全部。
-    void reloadCategories();
+    void applyPlanProjection();
+    void applyCategories();
+    void syncSourceError();
     [[nodiscard]] const model::TaskCategory *categoryForTask(
         const model::Task *task) const;
 
-    TaskListViewModel(model::TaskService &taskService,
-                      model::TaskCategoryService *categoryService,
-                      QObject *parent);
-
     // Service 由组合根拥有；列表只保留非拥有引用并监听其变化通知。
     model::TaskService &m_taskService;
-    /// 非拥有可选类别 Service；nullptr 仅用于隔离测试。
-    model::TaskCategoryService *m_categoryService{nullptr};
-    // 每分钟重新请求Model计划，使“已逾期”等随时间变化的推荐理由及时刷新。
-    QTimer m_reloadTimer;
-    // 全量计划顺序与当前可见投影分离，搜索和筛选不会修改领域数据。
-    QList<model::Task> m_allTasks;
+    TaskPlanProjectionSource &m_planSource;
+    TaskCategoryProjectionSource &m_categorySource;
     /// 当前筛选后、仍保持 Model 推荐相对顺序的行快照。
     QList<model::Task> m_visibleTasks;
     // 当前搜索、筛选与活动/归档范围内的稳定ID集合，用于O(1)批量资格检查。
     QSet<model::TaskId> m_visibleTaskIds;
-    QHash<model::TaskId, QString> m_orderReasonTexts;
-    // 逾期随当前时间变化，是 Model 计算后交给 ViewModel 的会话级投影。
-    QHash<model::TaskId, bool> m_overdueStates;
-    /// 按稳定 ID 索引的依赖文案与命令资格展示缓存。
-    QHash<model::TaskId, TaskDependencyProjection> m_dependencyProjections;
-    QHash<model::TaskId, model::TaskCommandAvailability> m_availabilities;
     // 批量选择只保存稳定 TaskId，且绝不写入持久化层。
     QSet<model::TaskId> m_bulkSelectedTaskIds;
     bool m_bulkSelectionMode{false};
@@ -152,7 +138,6 @@ private:
     QString m_searchText;
     // 0表示全部，1～4分别映射Low～Urgent；非法索引不会替换当前条件。
     int m_priorityFilterIndex{0};
-    QList<model::TaskCategory> m_categories;
     /// 0=全部、1=未分类、2=指定类别；筛选状态只存在于当前会话。
     int m_categoryFilterMode{0};
     model::TaskCategoryId m_categoryFilterCategoryId;

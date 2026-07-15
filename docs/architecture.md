@@ -13,7 +13,7 @@ Persistence → Repository 接口
 
 运行时：
 Widget 事件 → Contract 命令 → ViewModel → Model Service → Repository 接口
-Service 信号 → ViewModel 投影 → Contract 通知 → Widget 绑定
+Service 失效信号 → ViewModel 共享投影源 → 具体 ViewModel → Contract 通知 → Widget 绑定
 ```
 
 View 依赖 ViewModel 的抽象展示契约，而不是具体实现。该依赖倒置仍属于 MVVM：Contract 是 ViewModel 层公开给 View 的稳定边界，不是新的业务层、Controller 或消息总线。
@@ -72,16 +72,17 @@ Contracts 是 ViewModel 层的公开端口，不放入 Common。`smartmate_viewm
 
 ViewModel 负责可观察展示状态、语义命令及其可用性、输入草稿、会话选择、搜索筛选和结构化错误的中文展示映射。
 
-- 具体 ViewModel 实现对应 Contract，并只调用 Model Service。
+- 具体 ViewModel 实现对应 Contract，并只调用 Model Service 或读取显式注入的 ViewModel 共享投影源。
 - ViewModel 不得包含 QWidget、QDialog、QGraphicsScene、QGraphicsItem 等 View 类型，不得控制焦点、窗口、对话框或控件。
 - ViewModel 不得调用具体 Persistence，不得包含 SQL、状态机、依赖算法、统计公式或重复业务校验。
-- 所有 ViewModel 由 C++ 创建并持有；`AppViewModel` 可以拥有和协调子 ViewModel。
-- 子 ViewModel 禁止直接调用。它们通过相同 Service 的变化信号独立刷新；只有确实跨投影的会话协调可以由 `AppViewModel` 完成。
+- 所有 ViewModel 由 C++ 创建并持有；`AppViewModel` 先构造并拥有 `TaskPlanProjectionSource`、`TaskCategoryProjectionSource`，再把引用显式注入各子 ViewModel。
+- 共享源只缓存 Service 返回的只读计划与类别目录，使用强类型信号发布失效结果，不保存筛选、选择、草稿或图布局，也不向 Widget 暴露。它们不是 EventBus、Service Locator、Controller 或全局单例。
+- 子 ViewModel 禁止直接调用。多个消费者通过同一共享源获得一致快照；只有确实跨投影的会话协调可以由 `AppViewModel` 完成。
 - 搜索、筛选、批量选择、图选中和编辑草稿属于会话级展示状态，不写入 SQLite 或 QSettings。
 
 `TaskDependencyViewModel` 只消费 `TaskService::taskDependencyEditContext` 给出的目标、现有选择、候选范围和资格，不从原始任务列表重新推导业务上下文。`TaskEditorViewModel` 保存任务字段与新建前置集合的同一原子草稿。`TaskGraphViewModel` 只把 Model 图快照转换为像素坐标、正交路径、端口、箭头几何和详情投影。
 
-任务主流程按展示职责拆分为三个彼此独立的投影：`TaskListViewModel` 只负责列表、筛选、状态命令和批量选择，`TaskFocusViewModel` 负责不受列表筛选影响的“现在做”投影，`TaskDetailsViewModel` 负责稳定 `TaskId` 驱动的详情会话。三者不互相调用，分别监听同一个 `TaskService` 的变化信号，禁止把焦点或详情状态重新塞回列表 Contract。
+任务主流程按展示职责拆分为三个彼此独立的消费者：`TaskListViewModel` 只负责列表、筛选、状态命令和批量选择，`TaskFocusViewModel` 负责不受列表筛选影响的“现在做”投影，`TaskDetailsViewModel` 负责稳定 `TaskId` 驱动的详情会话。三者不互相调用，共享同一个 `TaskPlanProjectionSource`；计划源统一监听 `TaskService` 失效信号并持有唯一的一分钟刷新定时器，禁止把焦点或详情状态重新塞回列表 Contract。
 
 ### 3.5 Qt Widgets View
 
@@ -137,7 +138,8 @@ SmartMate                      → app core + smartmate_widgets + Qt6::Widgets
   → TaskService 复用状态机并校验依赖与单进行中约束
   → Repository 原子保存
   → Service 发出变化信号
-  → 各 ViewModel 独立重新投影
+  → AppViewModel 拥有的共享投影源同步刷新一次
+  → 各具体 ViewModel 从同一快照重新投影
   → Contract 通知驱动 Widget 更新
 ```
 
@@ -177,6 +179,7 @@ src/
   viewmodel/
     contracts/                # ViewModel 抽象展示端口
     AppViewModel.*
+    TaskProjectionSources.*  # AppViewModel 私有拥有的共享只读投影源
     TaskListViewModel.*
     TaskFocusViewModel.*
     TaskDetailsViewModel.*
