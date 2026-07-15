@@ -1,6 +1,6 @@
 #include "TaskItemDelegate.h"
 
-#include "TaskPage.h"
+#include "TaskListView.h"
 #include "view/widgets/theme/WidgetTheme.h"
 #include "viewmodel/contracts/TaskListContract.h"
 

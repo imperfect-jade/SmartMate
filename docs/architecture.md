@@ -104,7 +104,11 @@ View 全部位于 `src/view/widgets`，只使用 `.h/.cpp` 构建，不使用 `.
 
 任务 Widgets 页面由 `TaskListContract`、`TaskFocusContract`、`TaskDetailsContract`、`TaskEditorContract`、`TaskCategoryContract` 和 `TaskDependencyContract` 六个窄端口组成。焦点面板读取焦点投影，但状态命令仍转发给任务列表命令端口；详情只维护稳定 ID 选择，任务编辑器由 `sessionActive` 和草稿通知驱动。类别筛选、管理与依赖候选都直接读取 Contract Role，创建前置只修改编辑草稿，已有任务依赖只调用一次原子保存命令；Widget 不按行号、名称或状态重新推导业务身份与资格。
 
+`TaskPage` 只组合页面布局、筛选/批量控件和子对话框。`TaskListView` 封装专用拖拽手势，`TaskFocusPanel` 封装“现在做”展示与投影命令转发；两者共享的 View 私有 MIME 协议只携带稳定 `TaskId`。组件拆分不得让 Delegate、面板或页面自行推导任务资格，拖放接收后的状态与依赖约束仍由 Service 最终复核。
+
 依赖图 Widgets 页面只依赖 `TaskGraphContract` 及复用详情/依赖编辑所需的窄 Contract。`QGraphicsScene` 按节点 Role 放置 `QGraphicsObject`，按边 Role 给出的正交路径点和箭头顶点绘制连线；选中、悬停、筛选降暗、缩放、平移和详情展开属于 View 会话状态。Widget 禁止访问原始依赖边重建邻接关系，也不得计算拓扑、闭包、类别裁剪、阻塞状态或路径几何。
+
+`DependencyGraphToolbar` 负责筛选控件同步并向页面发出缩放、适配和定位意图；`TaskGraphDetailsPanel` 只读取所选节点 getter 与 Contract 提供的前置/后继子模型，并在关系激活时发出稳定 `TaskId`。`DependencyGraphPage` 保留画布组合、响应式展开、详情固定、对话框和居中时序。这些组件均不得访问原始图快照重新计算关系或业务状态。
 
 不建立 EventBus。直接 Qt 信号槽连接具有明确生产者、消费者、连接上下文和类型检查；全局总线会隐藏命令目标、状态来源、处理顺序和生命周期，并可能让 View 绕过 ViewModel。
 
@@ -201,7 +205,15 @@ src/
       MainWindow.*
       binding/
       task/
+        TaskPage.*
+        TaskListView.*
+        TaskFocusPanel.*
+        TaskDragMime.h          # 仅携带稳定 TaskId 的 View 私有拖拽协议
       graph/
+        DependencyGraphPage.*
+        DependencyGraphToolbar.*
+        TaskGraphDetailsPanel.*
+        DependencyGraphView.*
       settings/
 ```
 
