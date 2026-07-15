@@ -28,6 +28,7 @@ public:
                               QWidget *parent = nullptr);
 
 signals:
+    /// 请求页面打开类别管理窗口，避免编辑器自行依赖具体类别 View。
     void manageCategoriesRequested();
 
 protected:
@@ -36,16 +37,20 @@ protected:
     void showEvent(QShowEvent *event) override;
 
 private:
+    /// 重读全部草稿 getter，并用 QSignalBlocker 安全回填控件。
     void synchronize();
+    /// 根据 sessionActive 决定窗口显示/关闭，不把窗口状态写入 ViewModel。
     void synchronizeSession();
     void updateResponsiveLayout();
     void chooseDeadline();
     void chooseDuration();
 
+    /// 非拥有编辑 Contract；字段事件均转发为草稿命令。
     viewmodel::TaskEditorContract &m_editor;
     QLabel *m_headerTitle;
     QLabel *m_headerSubtitle;
     QScrollArea *m_scroll;
+    /// 规划字段网格在宽窄布局间重排，不改变字段数据。
     QGridLayout *m_planningGrid;
     QWidget *m_statusField;
     QWidget *m_priorityField;
@@ -65,6 +70,7 @@ private:
     QPushButton *m_durationClear;
     QLabel *m_validation;
     QPushButton *m_save;
+    /// 新建前置集合的子会话窗口，由本对话框拥有。
     TaskCreationPredecessorDialog *m_predecessorDialog;
 };
 

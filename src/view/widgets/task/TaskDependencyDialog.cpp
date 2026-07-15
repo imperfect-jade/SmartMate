@@ -110,6 +110,7 @@ TaskDependencyDialog::TaskDependencyDialog(
     m_description->setWordWrap(true);
     m_count->setObjectName(QStringLiteral("dependencySelectedCountLabel"));
     m_list->setObjectName(QStringLiteral("dependencyCandidateList"));
+    // Contract 提供候选、已选和资格 Role；View 不自行重建依赖规则。
     m_list->setModel(&m_dependencies);
     m_list->setItemDelegate(new DependencyCandidateDelegate(m_dependencies, m_list));
     m_empty->setAlignment(Qt::AlignCenter);
@@ -130,11 +131,13 @@ TaskDependencyDialog::TaskDependencyDialog(
     root->addWidget(buttons);
 
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+    // save() 一次提交完整前置集合；失败时保留窗口和草稿，禁止循环写单条依赖。
     connect(m_save, &QPushButton::clicked, this, [this] {
         if (!m_dependencies.save()) return;
         m_draftActive = false;
         QDialog::accept();
     });
+    // 多种 Contract 通知共享 synchronize，确保控件始终重读同一份草稿快照。
     connect(&m_dependencies, &viewmodel::TaskDependencyContract::contextChanged,
             this, &TaskDependencyDialog::synchronize);
     connect(&m_dependencies, &viewmodel::TaskDependencyContract::countChanged,
@@ -152,6 +155,7 @@ TaskDependencyDialog::TaskDependencyDialog(
 
 bool TaskDependencyDialog::openTask(const QString &taskId)
 {
+    // 切换目标前先结束旧草稿；只有 Contract 成功建立上下文后才展示窗口。
     if (m_draftActive) m_dependencies.cancel();
     m_notification->clear();
     if (!m_dependencies.beginEdit(taskId)) return false;

@@ -267,6 +267,7 @@ TaskEditorDialog::TaskEditorDialog(viewmodel::TaskEditorContract &editor,
 
     updateResponsiveLayout();
 
+    // Widget→Contract：用户编辑事件转发为强类型草稿命令；不在 View 内校验业务规则。
     connect(m_title, &QLineEdit::textEdited, &m_editor,
             &viewmodel::TaskEditorContract::setTitle);
     connect(m_description, &QPlainTextEdit::textChanged, this, [this] {
@@ -290,9 +291,11 @@ TaskEditorDialog::TaskEditorDialog(viewmodel::TaskEditorContract &editor,
     connect(m_durationClear, &QPushButton::clicked, &m_editor,
             &viewmodel::TaskEditorContract::clearEstimatedDuration);
     connect(cancel, &QPushButton::clicked, this, &TaskEditorDialog::reject);
+    // 保存只调用一次 Contract 命令；成功后 sessionActiveChanged 驱动窗口关闭。
     connect(m_save, &QPushButton::clicked, &m_editor,
             &viewmodel::TaskEditorContract::save);
 
+    // Contract→Widget：任一草稿通知到达后重读完整一致快照，避免字段间显示不同步。
     const auto sync = [this] { synchronize(); };
     connect(&m_editor, &viewmodel::TaskEditorContract::modeChanged, this, sync);
     connect(&m_editor, &viewmodel::TaskEditorContract::titleChanged, this, sync);
@@ -316,6 +319,7 @@ TaskEditorDialog::TaskEditorDialog(viewmodel::TaskEditorContract &editor,
 
 void TaskEditorDialog::reject()
 {
+    // 先回滚嵌套前置选择，再取消主编辑会话，保持检查点层级顺序。
     if (m_predecessorDialog->isVisible()) m_predecessorDialog->reject();
     if (m_editor.sessionActive()) m_editor.cancel();
     QDialog::reject();
@@ -357,6 +361,7 @@ void TaskEditorDialog::updateResponsiveLayout()
 
 void TaskEditorDialog::synchronizeSession()
 {
+    // 窗口可见性是 Contract 会话状态的展示结果；View 不自行判断保存是否成功。
     if (m_editor.sessionActive()) {
         const bool editing = m_editor.editMode();
         const QString title = editing ? tr("编辑任务") : tr("新建任务");
@@ -377,6 +382,7 @@ void TaskEditorDialog::synchronizeSession()
 
 void TaskEditorDialog::synchronize()
 {
+    // 程序性回填不得再次触发 Widget→Contract 命令，防止双向绑定回写循环。
     const QSignalBlocker titleBlocker(m_title);
     const QSignalBlocker descriptionBlocker(m_description);
     const QSignalBlocker priorityBlocker(m_priority);
@@ -433,6 +439,7 @@ void TaskEditorDialog::synchronize()
 
 void TaskEditorDialog::chooseDeadline()
 {
+    // 对话框只收集类型化本地日期字段；确认后一次交给 Contract 转换和校验。
     DeadlinePickerDialog picker(this);
     if (m_editor.hasDeadline()) {
         picker.setSelection(m_editor.deadlineYear(), m_editor.deadlineMonth(),
@@ -453,6 +460,7 @@ void TaskEditorDialog::chooseDeadline()
 
 void TaskEditorDialog::chooseDuration()
 {
+    // 合法分钟边界来自 Contract；View 仅把总时长拆成日/时/分控件。
     DurationPickerDialog picker(m_editor.minimumEstimatedMinutes(),
                                 m_editor.maximumEstimatedMinutes(), this);
     picker.setDuration(m_editor.hasEstimatedDuration() ? m_editor.estimatedDays() : 0,

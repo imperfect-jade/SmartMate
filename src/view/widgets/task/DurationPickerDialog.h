@@ -15,6 +15,7 @@ namespace smartmate::view::widgets {
 class DurationPickerDialog final : public QDialog {
     Q_OBJECT
 public:
+    /// 边界单位均为分钟，由 TaskEditorContract 提供。
     DurationPickerDialog(int minimumMinutes, int maximumMinutes,
                          QWidget *parent = nullptr);
 
@@ -31,11 +32,14 @@ private:
     void resizeEvent(QResizeEvent *event) override;
     void showEvent(QShowEvent *event) override;
 
+    /// 合法总时长边界，单位：分钟。
     int m_minimumMinutes;
     int m_maximumMinutes;
+    /// 日/时/分只是同一总分钟数的类型化输入分量。
     QSpinBox *m_days;
     QSpinBox *m_hours;
     QSpinBox *m_minutes;
+    /// 响应式布局在宽屏三列和窄屏单列间复用这些字段容器。
     QGridLayout *m_valuesGrid;
     QWidget *m_daysField;
     QWidget *m_hoursField;

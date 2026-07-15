@@ -122,6 +122,7 @@ DurationPickerDialog::DurationPickerDialog(const int minimumMinutes,
     connect(confirm, &QPushButton::clicked, this, &QDialog::accept);
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
 
+    // 分量变化只联动合法输入范围和摘要，不在 View 中复制任务预计用时业务校验。
     connect(m_days, &QSpinBox::valueChanged, this,
             &DurationPickerDialog::synchronizeRanges);
     connect(m_hours, &QSpinBox::valueChanged, this,
@@ -137,6 +138,7 @@ void DurationPickerDialog::setDuration(const int days, const int hours,
 {
     const int requested = days * 24 * 60 + hours * 60 + minutes;
     const int total = std::clamp(requested, m_minimumMinutes, m_maximumMinutes);
+    // 程序性初始化多个分量时阻断中间通知，避免摘要观察到不完整组合。
     const QSignalBlocker daysBlocker(m_days);
     const QSignalBlocker hoursBlocker(m_hours);
     m_days->setValue(total / (24 * 60));
@@ -157,6 +159,7 @@ int DurationPickerDialog::totalMinutes() const
 
 void DurationPickerDialog::synchronizeRanges()
 {
+    // 剩余可选范围由总分钟上下界派生，仅用于保证类型化控件组合可输入。
     const QSignalBlocker hoursBlocker(m_hours);
     const QSignalBlocker minutesBlocker(m_minutes);
     const int dayMinutes = m_days->value() * 24 * 60;

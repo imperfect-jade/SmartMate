@@ -14,6 +14,7 @@ class DeadlinePickerDialog final : public QDialog {
 public:
     explicit DeadlinePickerDialog(QWidget *parent = nullptr);
 
+    /// 用本地日历字段初始化候选值；对话框不负责 UTC 转换或业务校验。
     void setSelection(int year, int month, int day, int hour, int minute);
     [[nodiscard]] int selectedYear() const;
     [[nodiscard]] int selectedMonth() const;
@@ -24,6 +25,7 @@ public:
 private:
     void updateMonthTitle(int year, int month);
 
+    /// 候选日期、时间和月份标题均由对话框父对象拥有。
     QCalendarWidget *m_calendar;
     QTimeEdit *m_time;
     QLabel *m_monthTitle;

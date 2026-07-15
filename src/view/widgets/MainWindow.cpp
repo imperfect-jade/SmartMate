@@ -70,6 +70,8 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
     auto *taskPage = qobject_cast<TaskPage *>(m_pages->widget(0));
     connect(taskPage, &TaskPage::showDependencyGraphRequested, m_pages,
             [this] { m_pages->setCurrentIndex(1); });
+    // 各窄 Contract 的一次性展示通知统一汇聚到窗口状态栏；
+    // 通知只负责反馈，不承担 ViewModel 之间的数据同步。
     connect(&dependencies.taskList, &viewmodel::TaskListContract::notificationRaised,
             this, &MainWindow::showNotification);
     connect(&dependencies.taskFocus, &viewmodel::TaskFocusContract::notificationRaised,
@@ -156,12 +158,14 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
     m_pages->addWidget(graphPage);
     m_pages->addWidget(new SettingsPage{appearanceSettings, m_pages});
 
+    // 导航是纯 View 会话状态，只切换页面索引，不写入任何业务对象。
     connect(navigationGroup, &QButtonGroup::idClicked, m_pages,
             [this](const int index) { m_pages->setCurrentIndex(index); });
     m_taskNavigation->setChecked(true);
     m_pages->setCurrentIndex(0);
 
     statusBar()->setObjectName(QStringLiteral("notificationStatusBar"));
+    // 先建立通知连接再执行初始同步，后续 Contract 变化使用同一路径刷新主题。
     connect(&appearanceSettings,
             &viewmodel::AppearanceSettingsContract::appearanceChanged,
             this, &MainWindow::applyAppearance);
@@ -206,6 +210,7 @@ void MainWindow::applyAppearance()
 
 void MainWindow::showNotification(const common::UiNotification &notification)
 {
+    // View 决定通知的颜色和呈现位置；ViewModel 只提供严重级别与文案。
     const QString text = notification.title.isEmpty()
         ? notification.message
         : QStringLiteral("%1：%2").arg(notification.title, notification.message);

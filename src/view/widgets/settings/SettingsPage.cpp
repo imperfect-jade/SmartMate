@@ -141,6 +141,7 @@ SettingsPage::SettingsPage(viewmodel::AppearanceSettingsContract &settings,
     cardLayout->addLayout(resetLayout);
     contentLayout->addStretch();
 
+    // 单向绑定会先读取当前 getter，再监听 appearanceChanged；页面打开时不会等待下一次通知。
     binding::bindOneWay(settings,
                         &viewmodel::AppearanceSettingsContract::appearanceChanged,
                         *this,
@@ -148,9 +149,11 @@ SettingsPage::SettingsPage(viewmodel::AppearanceSettingsContract &settings,
                         [this](const int index) {
                             binding::setCheckedButton(*m_accentButtons, index);
                         });
+    // 只有用户点击才写回 Contract；程序性勾选已由绑定辅助器阻断信号。
     connect(m_accentButtons, &QButtonGroup::idClicked, this,
             [&settings](const int index) { settings.setAccentThemeIndex(index); });
 
+    // 组合框绑定明确区分 activated（用户命令）和 setCurrentIndex（状态回填）。
     binding::bindComboBoxIndex(
         settings, &viewmodel::AppearanceSettingsContract::appearanceChanged,
         *m_fontFamilyComboBox,
@@ -166,6 +169,7 @@ SettingsPage::SettingsPage(viewmodel::AppearanceSettingsContract &settings,
                         });
     connect(m_fontScaleButtons, &QButtonGroup::idClicked, this,
             [&settings](const int index) { settings.setFontScaleIndex(index); });
+    // 恢复默认是语义命令，具体默认值与持久化顺序均由 Model/ViewModel 决定。
     connect(resetButton, &QPushButton::clicked, this,
             [&settings] { settings.resetDefaults(); });
 }

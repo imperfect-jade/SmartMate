@@ -251,6 +251,7 @@ DependencyGraphPage::DependencyGraphPage(
     detailsBody->addWidget(m_selectedBlocking);
     m_predecessors->setObjectName(QStringLiteral("graphPredecessorList"));
     m_successors->setObjectName(QStringLiteral("graphSuccessorList"));
+    // 两个关系列表直接绑定 Contract 子模型，页面不遍历主图自行求前后继。
     m_predecessors->setModel(dependencies.taskGraph.selectedPredecessors());
     m_successors->setModel(dependencies.taskGraph.selectedSuccessors());
     m_predecessors->setItemDelegate(new RelationDelegate(m_predecessors));
@@ -283,6 +284,7 @@ DependencyGraphPage::DependencyGraphPage(
     m_fullDetails->setActionsVisible(false);
     m_dependencyEditor->setObjectName(QStringLiteral("graphTaskDependencyDialog"));
 
+    // Widget→Contract：筛选控件只把用户事件和稳定类别 ID 转发为会话命令。
     connect(m_search, &QLineEdit::textEdited, &dependencies.taskGraph,
             &viewmodel::TaskGraphContract::setSearchText);
     connect(m_search, &QLineEdit::returnPressed, this, [this] {
@@ -302,6 +304,7 @@ DependencyGraphPage::DependencyGraphPage(
         if (m_dependencies.taskGraph.selectCurrentTask()) selectAndCenter(
             m_dependencies.taskGraph.selectedTaskId());
     });
+    // 缩放、适配和详情固定均为 View 会话操作，不改变图领域投影。
     connect(m_zoomOut, &QToolButton::clicked, this,
             [this] { m_view->setZoomFactor(m_view->zoomFactor() - 0.1); });
     connect(m_zoomIn, &QToolButton::clicked, this,
@@ -327,6 +330,7 @@ DependencyGraphPage::DependencyGraphPage(
     connect(m_editDependencies, &QPushButton::clicked, this, [this] {
         m_dependencyEditor->openTask(m_dependencies.taskGraph.selectedTaskId());
     });
+    // 关系行激活后仍通过稳定 TaskId 选择主图节点，禁止使用关系模型行号跨模型定位。
     const auto relationActivated = [this](const QModelIndex &index) {
         selectAndCenter(index.data(Graph::RelationTaskIdRole).toString());
     };
@@ -339,6 +343,7 @@ DependencyGraphPage::DependencyGraphPage(
         m_zoomOut->setEnabled(factor > 0.5);
         m_zoomIn->setEnabled(factor < 2.0);
     });
+    // Contract→Widget：属性通知重读 getter，选择/图通知分别刷新详情和整体展示。
     connect(&dependencies.taskGraph, &viewmodel::TaskGraphContract::searchTextChanged,
             this, &DependencyGraphPage::synchronizeControls);
     connect(&dependencies.taskGraph, &viewmodel::TaskGraphContract::statusFilterIndexChanged,
@@ -383,6 +388,7 @@ DependencyGraphPage::DependencyGraphPage(
         connect(relations, &QAbstractItemModel::rowsRemoved,
                 this, &DependencyGraphPage::synchronizeRelations);
     }
+    // 连接完成后立即同步当前快照，页面首次显示不依赖未来通知。
     applyTheme();
     synchronizeControls();
     synchronizeDetails();
@@ -392,6 +398,7 @@ DependencyGraphPage::DependencyGraphPage(
 
 void DependencyGraphPage::activate()
 {
+    // 延迟到事件循环后适配，确保首次布局已获得真实 viewport 尺寸。
     if (!m_viewportInitialized) {
         m_viewportInitialized = true;
         QTimer::singleShot(0, m_view, &DependencyGraphView::fitContent);
@@ -415,6 +422,7 @@ void DependencyGraphPage::showEvent(QShowEvent *event)
 void DependencyGraphPage::synchronizeControls()
 {
     auto &graph = m_dependencies.taskGraph;
+    // 程序性回填筛选控件时阻断信号，避免形成 Contract→Widget→Contract 回写。
     const QSignalBlocker searchBlocker(m_search), statusBlocker(m_statusFilter),
                          categoryBlocker(m_categoryFilter);
     m_search->setText(graph.searchText());
@@ -445,6 +453,7 @@ void DependencyGraphPage::synchronizeControls()
 
 void DependencyGraphPage::synchronizeDetails()
 {
+    // 详情只读取所选节点 getter；阻塞原因、计数和编辑资格都由 ViewModel 投影。
     auto &graph = m_dependencies.taskGraph;
     m_selectedTitle->setText(graph.selectedTaskTitle());
     const QString category = graph.selectedHasCategory()
@@ -550,6 +559,7 @@ void DependencyGraphPage::updateResponsiveLayout()
 
 void DependencyGraphPage::setDetailsExpanded(const bool expanded)
 {
+    // 没有稳定选择时不允许展开空详情；展开状态仅保存在页面生命周期内。
     m_detailsExpanded = expanded && !m_dependencies.taskGraph.selectedTaskId().isEmpty();
     m_detailsPanel->setVisible(m_detailsExpanded);
     m_openDetails->setVisible(!m_detailsExpanded

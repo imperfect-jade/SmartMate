@@ -185,6 +185,7 @@ void TaskItemDelegate::paint(QPainter *painter,
                       painter->fontMetrics().elidedText(
                           reason, Qt::ElideRight, textRect.width()));
 
+    // 主动作完全取决于 Model 投影的资格 Role；Delegate 不复制任务状态机判断。
     if (!m_tasks.bulkSelectionMode()) {
         QString action;
         if (index.data(Role::CanStartRole).toBool()) action = QObject::tr("开始");
@@ -220,12 +221,14 @@ bool TaskItemDelegate::editorEvent(QEvent *event, QAbstractItemModel *,
     if (event->type() != QEvent::MouseButtonRelease) return false;
     const auto *mouse = static_cast<QMouseEvent *>(event);
     if (mouse->button() != Qt::LeftButton) return false;
+    // 行号只用于命中当前卡片，跨层命令和页面导航始终转发稳定 TaskId。
     const QString id = index.data(Role::TaskIdRole).toString();
     const QString title = index.data(Role::TitleRole).toString();
     if (m_tasks.bulkSelectionMode()) {
         if (index.data(Role::BulkSelectableRole).toBool()) m_tasks.toggleBulkSelection(id);
         return true;
     }
+    // 可直接执行的状态命令调用 Contract；需要确认的破坏性动作交给页面处理。
     if (primaryActionRect(option.rect.adjusted(2, 4, -2, -4)).contains(mouse->position().toPoint())) {
         if (index.data(Role::CanStartRole).toBool()) m_tasks.startTask(id);
         else if (index.data(Role::CanCompleteRole).toBool()) m_tasks.completeTask(id);

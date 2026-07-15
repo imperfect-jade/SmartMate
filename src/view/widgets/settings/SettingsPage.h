@@ -20,7 +20,9 @@ public:
                           QWidget *parent = nullptr);
 
 private:
+    /// 非拥有 Contract；用户点击只调用语义 setter，通知到达后再回填控件。
     viewmodel::AppearanceSettingsContract &m_settings;
+    /// 三组控件分别绑定强调色、字体族和字号比例展示状态。
     QButtonGroup *m_accentButtons;
     QComboBox *m_fontFamilyComboBox;
     QButtonGroup *m_fontScaleButtons;

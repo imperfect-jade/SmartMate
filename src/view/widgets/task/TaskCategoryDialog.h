@@ -23,16 +23,20 @@ public:
     void openManager();
 
 private:
+    /// Contract 通知到达后同步草稿字段；QSignalBlocker 防止程序回填形成命令循环。
     void synchronizeDraft();
+    /// 根据 Contract 资格启用保存、编辑和删除按钮。
     void synchronizeActions();
     void selectEditingCategory();
     [[nodiscard]] QString selectedCategoryId() const;
 
+    /// 非拥有类别 Contract，同时作为 QListView 的抽象模型。
     viewmodel::TaskCategoryContract &m_categories;
     QListView *m_list;
     QLabel *m_empty;
     QLineEdit *m_name;
     QComboBox *m_color;
+    /// 对话框内瞬时通知区域；不作为类别数据源。
     QLabel *m_notification;
     QPushButton *m_edit;
     QPushButton *m_delete;

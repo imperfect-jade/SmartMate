@@ -38,6 +38,7 @@ TaskDetailsDialog::TaskDetailsDialog(viewmodel::TaskDetailsContract &details,
     buttons->addButton(m_editDependencies, QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    // 详情窗口只发导航意图，页面决定打开哪个编辑 View；传递稳定 TaskId。
     connect(m_edit, &QPushButton::clicked, this, [this] {
         const QString id = m_details.selectedTaskId();
         accept();
@@ -48,6 +49,7 @@ TaskDetailsDialog::TaskDetailsDialog(viewmodel::TaskDetailsContract &details,
         accept();
         emit editDependenciesRequested(id);
     });
+    // 建立通知连接后立即同步一次，覆盖首次打开前已有投影的情况。
     connect(&m_details, &viewmodel::TaskDetailsContract::selectionChanged,
             this, &TaskDetailsDialog::synchronize);
     synchronize();
@@ -69,11 +71,13 @@ void TaskDetailsDialog::setActionsVisible(const bool visible)
 void TaskDetailsDialog::done(const int result)
 {
     QDialog::done(result);
+    // 窗口关闭即释放会话选择，避免下次打开短暂显示上一任务。
     m_details.clearSelection();
 }
 
 void TaskDetailsDialog::synchronize()
 {
+    // 所有文字和命令资格只读取 Contract，View 不推导状态机或依赖条件。
     m_title->setText(m_details.selectedTitle());
     QStringList summary{m_details.selectedStatusText(),
                         tr("%1优先级").arg(m_details.selectedPriorityText())};

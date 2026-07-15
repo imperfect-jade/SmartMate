@@ -29,6 +29,7 @@ DependencyGraphView::DependencyGraphView(viewmodel::TaskGraphContract &graph,
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setFrameShape(QFrame::NoFrame);
 
+    // 节点/边结构变化必须重建场景；仅 Role 变化时刷新现有图元，保留视口状态。
     connect(&m_graph, &QAbstractItemModel::modelReset,
             this, &DependencyGraphView::rebuildScene);
     connect(&m_graph, &QAbstractItemModel::rowsInserted,
@@ -58,6 +59,7 @@ qreal DependencyGraphView::zoomFactor() const noexcept { return m_zoomFactor; }
 
 void DependencyGraphView::setZoomFactor(const qreal factor)
 {
+    // 缩放是纯 View 状态，限制在可操作范围内且不写回 Contract 或持久层。
     const qreal normalized = std::clamp(factor, 0.5, 2.0);
     if (qFuzzyCompare(m_zoomFactor, normalized)) return;
     m_zoomFactor = normalized;
@@ -109,12 +111,14 @@ void DependencyGraphView::mousePressEvent(QMouseEvent *event)
         }
         hit = hit->parentItem();
     }
+    // 点击空白只提交清除选择命令；节点点击由图元转发稳定 TaskId。
     if (event->button() == Qt::LeftButton && !nodeHit) m_graph.clearSelection();
     QGraphicsView::mousePressEvent(event);
 }
 
 void DependencyGraphView::rebuildScene()
 {
+    // 先绘边后绘节点控制 Z 关系；坐标和路径已由 Contract Role 完整提供。
     scene()->clear();
     m_nodes.clear();
     m_edges.clear();

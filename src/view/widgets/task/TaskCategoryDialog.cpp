@@ -87,6 +87,7 @@ TaskCategoryDialog::TaskCategoryDialog(
     setMinimumSize(620, 420);
 
     m_list->setObjectName(QStringLiteral("categoryListView"));
+    // Contract 本身是抽象列表模型；Delegate 只消费稳定 Role，不接触类别领域实体。
     m_list->setModel(&m_categories);
     m_list->setItemDelegate(new TaskCategoryDelegate(m_list));
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -133,6 +134,7 @@ TaskCategoryDialog::TaskCategoryDialog(
     auto *close = new QDialogButtonBox(QDialogButtonBox::Close, this);
     draft->addWidget(close);
     connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    // 控件事件直接转发为 Contract 语义命令；删除确认属于 View 的交互职责。
     connect(create, &QPushButton::clicked, &m_categories,
             &viewmodel::TaskCategoryContract::beginCreate);
     connect(m_edit, &QPushButton::clicked, this, [this] {
@@ -161,12 +163,14 @@ TaskCategoryDialog::TaskCategoryDialog(
             &viewmodel::TaskCategoryContract::cancel);
     connect(m_save, &QPushButton::clicked, &m_categories,
             &viewmodel::TaskCategoryContract::save);
+    // textEdited/activated 只代表用户输入，程序性回填不会重复写回草稿。
     connect(m_name, &QLineEdit::textEdited, &m_categories,
             &viewmodel::TaskCategoryContract::setDraftName);
     connect(m_color, &QComboBox::activated, &m_categories,
             &viewmodel::TaskCategoryContract::setDraftColorIndex);
     connect(m_list->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &TaskCategoryDialog::synchronizeActions);
+    // Contract 通知只表示 getter 已变化；窗口收到后统一重读当前草稿和资格。
     connect(&m_categories, &viewmodel::TaskCategoryContract::draftChanged,
             this, &TaskCategoryDialog::synchronizeDraft);
     connect(&m_categories, &viewmodel::TaskCategoryContract::countChanged,
@@ -193,6 +197,7 @@ void TaskCategoryDialog::openManager()
 
 void TaskCategoryDialog::synchronizeDraft()
 {
+    // 阻断回填信号，严格区分 ViewModel→Widget 同步与用户→Contract 命令。
     const QSignalBlocker nameBlocker(m_name);
     const QSignalBlocker colorBlocker(m_color);
     m_name->setText(m_categories.draftName());
@@ -225,6 +230,7 @@ void TaskCategoryDialog::synchronizeActions()
 
 void TaskCategoryDialog::selectEditingCategory()
 {
+    // 保存或重载后用稳定类别 ID 恢复选择，不能依赖可能变化的行号。
     const QString editingId = m_categories.editingCategoryId();
     if (editingId.isEmpty()) return;
     for (int row = 0; row < m_categories.rowCount(); ++row) {

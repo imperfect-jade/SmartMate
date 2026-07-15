@@ -37,6 +37,7 @@ QString TaskGraphNodeItem::taskId() const
 void TaskGraphNodeItem::refresh(const WidgetTheme &theme, const bool animate)
 {
     if (!m_index.isValid()) return;
+    // 尺寸、位置和强调级别全部读取 Role；图元不计算拓扑层级或节点布局。
     prepareGeometryChange();
     m_theme = theme;
     m_size = {m_index.data(Graph::NodeWidthRole).toReal(),
@@ -166,6 +167,7 @@ void TaskGraphNodeItem::paint(QPainter *painter,
 void TaskGraphNodeItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
+        // 图元只转发稳定 ID 选择命令，选中 Role 的变化由 Contract 通知回来。
         m_graph.selectTask(taskId());
         event->accept();
         return;
@@ -199,6 +201,7 @@ QRectF TaskGraphEdgeItem::boundingRect() const { return m_bounds; }
 
 void TaskGraphEdgeItem::rebuildPath()
 {
+    // 正交折点和箭头三角形均来自 Contract，View 只转换成 Qt 绘制对象。
     prepareGeometryChange();
     m_path = {};
     const QVariantList points = m_index.data(Graph::EdgeRoutePointsRole).toList();
@@ -243,6 +246,7 @@ void TaskGraphEdgeItem::paint(QPainter *painter,
 
 QPen TaskGraphEdgeItem::presentationPen() const
 {
+    // 线型是边语义 Role 的视觉映射，不用于反推或改变依赖状态。
     const bool cancelled = m_index.data(Graph::EdgeCancelledRole).toBool();
     const bool satisfied = m_index.data(Graph::EdgeSatisfiedRole).toBool();
     const bool emphasized = m_index.data(Graph::EdgeHighlightedRole).toBool()

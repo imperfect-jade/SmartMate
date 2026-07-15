@@ -121,6 +121,7 @@ DeadlinePickerDialog::DeadlinePickerDialog(QWidget *parent)
     });
     connect(m_calendar, &QCalendarWidget::currentPageChanged,
             this, &DeadlinePickerDialog::updateMonthTitle);
+    // accept/reject 只提交对话框结果；调用方在 accept 后才把类型化字段写入 Contract。
     connect(confirm, &QPushButton::clicked, this, &QDialog::accept);
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
     updateMonthTitle(m_calendar->yearShown(), m_calendar->monthShown());
@@ -130,6 +131,7 @@ void DeadlinePickerDialog::setSelection(const int year, const int month,
                                         const int day, const int hour,
                                         const int minute)
 {
+    // 非法外部字段保持控件原值，最终业务范围仍由 TaskEditorContract/Model 校验。
     const QDate date{year, month, day};
     const QTime time{hour, minute};
     if (date.isValid()) m_calendar->setSelectedDate(date);

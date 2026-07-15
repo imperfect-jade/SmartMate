@@ -16,10 +16,12 @@ public:
     explicit TaskDetailsDialog(viewmodel::TaskDetailsContract &details,
                                QWidget *parent = nullptr);
 
+    /// 先让 Contract 按稳定 TaskId 建立详情投影，成功后才显示对话框。
     bool openTask(const QString &taskId);
     void setActionsVisible(bool visible);
 
 signals:
+    /// 只向页面转发稳定 TaskId；对话框不直接创建编辑器或依赖编辑器。
     void editRequested(const QString &taskId);
     void editDependenciesRequested(const QString &taskId);
 
@@ -29,6 +31,7 @@ protected:
 private:
     void synchronize();
 
+    /// 非拥有详情 Contract；所有标签内容均在 selectionChanged 后重读。
     viewmodel::TaskDetailsContract &m_details;
     QLabel *m_title;
     QLabel *m_summary;

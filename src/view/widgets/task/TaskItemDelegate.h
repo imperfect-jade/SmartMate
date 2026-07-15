@@ -24,6 +24,7 @@ public:
                      const QModelIndex &index) override;
 
 signals:
+    /// 需要确认或打开其他视图的动作交给页面；命令身份始终使用稳定 TaskId。
     void detailsRequested(const QString &taskId);
     void editRequested(const QString &taskId);
     void editDependenciesRequested(const QString &taskId);
@@ -34,6 +35,7 @@ signals:
 private:
     [[nodiscard]] QRect primaryActionRect(const QRect &rect) const;
     [[nodiscard]] QRect menuRect(const QRect &rect) const;
+    /// 非拥有列表 Contract；Delegate 只读取 Role 并调用其强类型命令。
     viewmodel::TaskListContract &m_tasks;
 };
 

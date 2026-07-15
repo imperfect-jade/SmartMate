@@ -28,6 +28,7 @@ class TaskDependencyContract;
 namespace smartmate::view::widgets {
 
 struct TaskPageDependencies {
+    /// 页面只保存组合根提供的非拥有窄 Contract，不接触具体 ViewModel 或 Service。
     viewmodel::TaskListContract &taskList;
     viewmodel::TaskFocusContract &taskFocus;
     viewmodel::TaskDetailsContract &taskDetails;
@@ -41,6 +42,7 @@ class TaskDependencyDialog;
 class TaskEditorDialog;
 class TaskDetailsDialog;
 
+/// 扩展原生 QListView 的稳定 ID 拖拽手势，不解释任务业务规则。
 class TaskListView final : public QListView {
     Q_OBJECT
 public:
@@ -56,11 +58,13 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
 private:
+    /// 清除一次拖拽候选；持久索引只在当前模型快照内有效。
     void clearDragCandidate();
     QPersistentModelIndex m_dragCandidate;
     QPoint m_dragStartPosition;
 };
 
+/// 聚焦任务摘要面板；读取 Focus Contract，动作通过 List Contract 转发。
 class TaskFocusPanel final : public QFrame {
     Q_OBJECT
 public:
@@ -68,6 +72,7 @@ public:
                    viewmodel::TaskListContract &tasks,
                    QWidget *parent = nullptr);
 signals:
+    /// 页面级导航请求，不直接打开具体对话框或切换主窗口页面。
     void detailsRequested(const QString &taskId);
     void createRequested();
     void dependencyGraphRequested();
@@ -80,6 +85,7 @@ private:
     void setDragActive(bool active);
     void synchronize();
     void applyPresentationStyle();
+    /// 两个 Contract 均为非拥有引用：一个供展示，一个供状态命令。
     viewmodel::TaskFocusContract &m_focus;
     viewmodel::TaskListContract &m_tasks;
     QFrame *m_iconFrame;
@@ -93,6 +99,7 @@ private:
     QLabel *m_overdueReminder;
     QPushButton *m_details;
     QPushButton *m_primary;
+    /// 防止样式变更事件递归；拖拽状态仅用于临时视觉反馈。
     bool m_applyingStyle{false};
     bool m_dragActive{false};
 };
@@ -106,11 +113,13 @@ public:
 signals:
     void showDependencyGraphRequested();
 private:
+    /// 需要用户确认的破坏性动作留在 View，确认后只提交一次 Contract 命令。
     bool confirm(const QString &title, const QString &message);
     void openEditor(const QString &taskId);
     void updateControls();
 
     TaskPageDependencies m_dependencies;
+    /// 顶部焦点区和列表筛选/批量控件。
     TaskFocusPanel *m_focus;
     QLineEdit *m_search;
     QComboBox *m_priority;
@@ -130,6 +139,7 @@ private:
     QStackedWidget *m_content;
     QLabel *m_empty;
     TaskListView *m_list;
+    /// 子对话框由页面拥有，仅通过 Contract 和稳定 ID 协作。
     TaskDetailsDialog *m_details;
     TaskEditorDialog *m_editor;
     TaskCategoryDialog *m_categories;

@@ -6,6 +6,7 @@ namespace smartmate::view::widgets {
 
 WidgetTheme WidgetTheme::fromAccentIndex(const int accentThemeIndex)
 {
+    // Contract 暴露稳定选项索引，View 在此一次映射为完整 Widgets 色板。
     const bool blue = accentThemeIndex == 1;
     return {
         QColor{blue ? "#2563eb" : "#507936"},
@@ -63,6 +64,7 @@ QColor WidgetTheme::priorityColor(const int priorityIndex) const
 
 QPalette WidgetTheme::palette() const
 {
+    // Palette 与 QSS 共用同一主题对象，避免自绘图元和标准控件出现颜色分裂。
     QPalette result;
     result.setColor(QPalette::Window, background);
     result.setColor(QPalette::WindowText, textPrimary);
@@ -197,6 +199,7 @@ QString WidgetTheme::styleSheet() const
 QFont appearanceFont(const QFont &baseline,
                      const viewmodel::AppearanceSettingsContract &settings)
 {
+    // 每次从基准字体重算比例，禁止在当前字体上连续乘法造成累计漂移。
     QFont result = baseline;
     const QString family = settings.fontFamilyName();
     if (!family.isEmpty()) {

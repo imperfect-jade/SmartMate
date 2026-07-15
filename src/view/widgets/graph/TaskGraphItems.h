@@ -23,6 +23,7 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
                QWidget *widget = nullptr) override;
     void refresh(const WidgetTheme &theme, bool animate = true);
+    /// 返回 Role 中的稳定 TaskId，供点击命令和视口定位使用。
     [[nodiscard]] QString taskId() const;
 
 protected:
@@ -31,6 +32,7 @@ protected:
     void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override;
 
 private:
+    /// Contract 与持久索引均为观察引用；模型重置后图元会由 View 重建。
     viewmodel::TaskGraphContract &m_graph;
     QPersistentModelIndex m_index;
     WidgetTheme m_theme;
@@ -51,8 +53,10 @@ public:
     [[nodiscard]] QPen presentationPen() const;
 
 private:
+    /// 只把 Contract 提供的折点转换为 QPainterPath，不重新计算依赖几何。
     void rebuildPath();
 
+    /// 持久索引跟随行移动；模型重置时所属图元会被销毁重建。
     QPersistentModelIndex m_index;
     WidgetTheme m_theme;
     QPainterPath m_path;

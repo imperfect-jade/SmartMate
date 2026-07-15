@@ -72,6 +72,7 @@ QColor TaskListView::cardSurfaceColor() const
 
 void TaskListView::startDrag(Qt::DropActions)
 {
+    // MIME 只携带稳定 TaskId 和展示标题；拖放最终仍调用 Contract 命令并由 Model 复核。
     const QModelIndex index = m_dragCandidate.isValid()
         ? QModelIndex(m_dragCandidate) : currentIndex();
     if (!index.isValid() || !index.data(ListRole::CanStartRole).toBool()) return;
@@ -229,11 +230,13 @@ TaskFocusPanel::TaskFocusPanel(viewmodel::TaskFocusContract &focus,
     actions->addWidget(m_details); actions->addWidget(m_primary);
     actions->addStretch();
     layout->addLayout(actions);
+    // 先监听聚合焦点通知，再同步当前 getter，覆盖初始快照和后续变化。
     connect(&m_focus, &viewmodel::TaskFocusContract::focusTaskChanged,
             this, &TaskFocusPanel::synchronize);
     connect(m_details, &QPushButton::clicked, this, [this] {
         if (!m_focus.focusTaskId().isEmpty()) emit detailsRequested(m_focus.focusTaskId());
     });
+    // 同一个主按钮根据 Contract 投影发出语义命令或页面导航，不自行计算资格。
     connect(m_primary, &QPushButton::clicked, this, [this] {
         switch (m_focus.focusState()) {
         case viewmodel::TaskFocusContract::FocusState::InProgress:
@@ -251,6 +254,7 @@ TaskFocusPanel::TaskFocusPanel(viewmodel::TaskFocusContract &focus,
 
 void TaskFocusPanel::synchronize()
 {
+    // 面板只解释 Focus Contract 的聚合展示状态；拖拽覆盖层是纯 View 临时状态。
     const auto state = m_focus.focusState();
     if (m_dragActive) {
         m_icon->setText(QStringLiteral("↓"));
@@ -381,6 +385,7 @@ void TaskFocusPanel::dropEvent(QDropEvent *event)
     setDragActive(false);
     if (canAccept) {
         event->acceptProposedAction();
+        // View 的接收判断只控制手势反馈，Service 仍最终复核状态、依赖和单进行中约束。
         m_tasks.startTask(id);
     } else {
         event->ignore();
@@ -470,9 +475,11 @@ TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
     m_content->addWidget(m_list);
     root->addWidget(m_content, 1);
 
+    // TaskListContract 直接作为 Qt Model；Delegate 通过稳定 Role 绘制和转发命令。
     m_list->setModel(&dependencies.taskList);
     auto *delegate = new TaskItemDelegate(dependencies.taskList, m_list);
     m_list->setItemDelegate(delegate);
+    // Widget→Contract：只使用用户事件 textEdited/activated/idClicked 写入筛选会话。
     connect(scope, &QButtonGroup::idClicked, this, [this](int id) { m_dependencies.taskList.setShowArchived(id == 1); });
     connect(m_search, &QLineEdit::textEdited, &dependencies.taskList, &viewmodel::TaskListContract::setSearchText);
     connect(m_priority, &QComboBox::activated, &dependencies.taskList, &viewmodel::TaskListContract::setPriorityFilterIndex);
@@ -491,6 +498,7 @@ TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
     connect(clear, &QPushButton::clicked, &dependencies.taskList, &viewmodel::TaskListContract::clearBulkSelection);
     connect(exit, &QPushButton::clicked, &dependencies.taskList, &viewmodel::TaskListContract::cancelBulkSelection);
     connect(m_bulkRestore, &QPushButton::clicked, &dependencies.taskList, &viewmodel::TaskListContract::restoreSelectedTasks);
+    // 确认属于 View；确认后整批只提交一次命令，原子性由 Model/Repository 保证。
     connect(m_bulkArchive, &QPushButton::clicked, this, [this] {
         if (confirm(tr("确认批量归档"), tr("确定归档选中的 %1 项任务吗？").arg(m_dependencies.taskList.bulkSelectedCount())))
             m_dependencies.taskList.archiveSelectedTasks();
@@ -499,6 +507,7 @@ TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
         if (confirm(tr("确认批量永久删除"), tr("永久删除选中的 %1 项归档任务且同时清理关联依赖？").arg(m_dependencies.taskList.bulkSelectedCount())))
             m_dependencies.taskList.deleteSelectedArchivedTasks();
     });
+    // Delegate 只转发稳定 ID 或页面动作；页面负责打开对应的窄 Contract 对话框。
     connect(delegate, &TaskItemDelegate::detailsRequested, m_details, &TaskDetailsDialog::openTask);
     connect(delegate, &TaskItemDelegate::editRequested, this, &TaskPage::openEditor);
     connect(delegate, &TaskItemDelegate::editDependenciesRequested,
@@ -523,6 +532,7 @@ TaskPage::TaskPage(TaskPageDependencies dependencies, QWidget *parent)
     connect(m_focus, &TaskFocusPanel::detailsRequested, m_details, &TaskDetailsDialog::openTask);
     connect(m_focus, &TaskFocusPanel::createRequested, &dependencies.taskEditor, &viewmodel::TaskEditorContract::beginCreate);
     connect(m_focus, &TaskFocusPanel::dependencyGraphRequested, this, &TaskPage::showDependencyGraphRequested);
+    // Contract 属性通知与 Qt Model 结构通知统一驱动控件同步；初始化后立即读取一次 getter。
     connect(&dependencies.taskList, &viewmodel::TaskListContract::showArchivedChanged, this, &TaskPage::updateControls);
     connect(&dependencies.taskList, &viewmodel::TaskListContract::searchTextChanged, this, &TaskPage::updateControls);
     connect(&dependencies.taskList, &viewmodel::TaskListContract::priorityFilterIndexChanged, this, &TaskPage::updateControls);
@@ -552,6 +562,7 @@ void TaskPage::openEditor(const QString &taskId)
 void TaskPage::updateControls()
 {
     const auto &tasks = m_dependencies.taskList;
+    // 回填筛选控件时阻断其信号，防止 Contract→Widget 更新被误发为用户命令。
     const QSignalBlocker searchBlocker(m_search), priorityBlocker(m_priority),
                          categoryBlocker(m_category),
                          activeBlocker(m_active), archivedBlocker(m_archived);

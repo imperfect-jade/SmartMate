@@ -104,6 +104,7 @@ TaskCreationPredecessorDialog::TaskCreationPredecessorDialog(
     resize(640, 520);
     setMinimumSize(480, 400);
     m_list->setObjectName(QStringLiteral("creationPredecessorCandidateList"));
+    // TaskEditorContract 在此前置候选视图中临时充当列表模型，选择身份仍为稳定 TaskId。
     m_list->setModel(&m_editor);
     m_list->setItemDelegate(new CreationCandidateDelegate(m_editor, m_list));
     m_count->setObjectName(QStringLiteral("creationPredecessorSelectedCountLabel"));
@@ -127,6 +128,7 @@ TaskCreationPredecessorDialog::TaskCreationPredecessorDialog(
     root->addWidget(buttons);
 
     connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
+    // 确认/取消只提交或回滚前置选择子会话，真正创建任务仍由主编辑器一次保存。
     connect(accept, &QPushButton::clicked, this, [this] {
         m_editor.acceptPredecessorSelection();
         m_selectionActive = false;
@@ -143,6 +145,7 @@ TaskCreationPredecessorDialog::TaskCreationPredecessorDialog(
 
 void TaskCreationPredecessorDialog::openSelection()
 {
+    // 先建立检查点再显示窗口，保证关闭窗口能够恢复进入前的选择集合。
     m_editor.beginPredecessorSelection();
     m_selectionActive = true;
     synchronize();
@@ -160,6 +163,7 @@ void TaskCreationPredecessorDialog::reject()
 
 void TaskCreationPredecessorDialog::synchronize()
 {
+    // 列表行的选中 Role 由 Contract 通知刷新；这里仅同步聚合计数和空状态。
     m_count->setText(tr("已选择 %1 项").arg(m_editor.selectedPredecessorCount()));
     m_clear->setEnabled(m_editor.selectedPredecessorCount() > 0);
     m_empty->setVisible(m_editor.predecessorCandidateCount() == 0);
