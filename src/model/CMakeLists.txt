@@ -34,7 +34,14 @@ add_library(smartmate_model STATIC
     repositories/ITaskCategoryRepository.h
     services/TaskService.h
     services/TaskService.cpp
-    services/TaskServiceSupport.h
+    services/TaskServiceQueries.cpp
+    services/TaskServiceDependencyCommands.cpp
+    services/TaskServiceDraftCommands.cpp
+    services/TaskServiceTransitionCommands.cpp
+    services/internal/TaskServiceResultSupport.h
+    services/internal/TaskServiceResultSupport.cpp
+    services/internal/TaskServiceSnapshotSupport.h
+    services/internal/TaskServiceSnapshotSupport.cpp
     services/TaskResult.h
     services/TaskCategoryResult.h
     services/TaskCategoryService.h
