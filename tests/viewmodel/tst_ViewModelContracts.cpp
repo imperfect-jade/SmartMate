@@ -7,6 +7,8 @@
 #include "TaskProjectionSources.h"
 #include "TaskFocusViewModel.h"
 #include "TaskDetailsViewModel.h"
+#include "StatisticsProjectionModels.h"
+#include "StatisticsViewModel.h"
 #include "common/presentation/UiNotification.h"
 #include "fakes/FakeAppearanceSettingsRepository.h"
 #include "fakes/FakeTaskBatchTransitionRepository.h"
@@ -25,6 +27,7 @@
 #include "viewmodel/contracts/TaskListContract.h"
 #include "viewmodel/contracts/TaskFocusContract.h"
 #include "viewmodel/contracts/TaskDetailsContract.h"
+#include "viewmodel/contracts/StatisticsContract.h"
 
 #include <QAbstractItemModelTester>
 #include <QMetaEnum>
@@ -45,6 +48,10 @@ static_assert(std::is_abstract_v<viewmodel::TaskGraphContract>);
 static_assert(std::is_abstract_v<viewmodel::TaskListContract>);
 static_assert(std::is_abstract_v<viewmodel::TaskFocusContract>);
 static_assert(std::is_abstract_v<viewmodel::TaskDetailsContract>);
+static_assert(std::is_abstract_v<viewmodel::StatisticsContract>);
+static_assert(std::is_abstract_v<viewmodel::StatisticsTrendContract>);
+static_assert(std::is_abstract_v<viewmodel::StatisticsCategoryContract>);
+static_assert(std::is_abstract_v<viewmodel::StatisticsHealthContract>);
 
 static_assert(std::has_virtual_destructor_v<viewmodel::AppearanceSettingsContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskCategoryContract>);
@@ -54,6 +61,10 @@ static_assert(std::has_virtual_destructor_v<viewmodel::TaskGraphContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskListContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskFocusContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskDetailsContract>);
+static_assert(std::has_virtual_destructor_v<viewmodel::StatisticsContract>);
+static_assert(std::has_virtual_destructor_v<viewmodel::StatisticsTrendContract>);
+static_assert(std::has_virtual_destructor_v<viewmodel::StatisticsCategoryContract>);
+static_assert(std::has_virtual_destructor_v<viewmodel::StatisticsHealthContract>);
 
 static_assert(std::is_base_of_v<viewmodel::AppearanceSettingsContract,
                                 viewmodel::AppearanceSettingsViewModel>);
@@ -71,6 +82,14 @@ static_assert(std::is_base_of_v<viewmodel::TaskFocusContract,
                                 viewmodel::TaskFocusViewModel>);
 static_assert(std::is_base_of_v<viewmodel::TaskDetailsContract,
                                 viewmodel::TaskDetailsViewModel>);
+static_assert(std::is_base_of_v<viewmodel::StatisticsContract,
+                                viewmodel::StatisticsViewModel>);
+static_assert(std::is_base_of_v<viewmodel::StatisticsTrendContract,
+                                viewmodel::StatisticsTrendListModel>);
+static_assert(std::is_base_of_v<viewmodel::StatisticsCategoryContract,
+                                viewmodel::StatisticsCategoryListModel>);
+static_assert(std::is_base_of_v<viewmodel::StatisticsHealthContract,
+                                viewmodel::StatisticsHealthListModel>);
 
 namespace {
 
@@ -220,6 +239,17 @@ void ViewModelContractsTest::concreteMetaObjectsExposeInheritedQmlApi()
                 .indexOfProperty("selectedCount") >= 0);
     QVERIFY(viewmodel::AppearanceSettingsViewModel::staticMetaObject
                 .indexOfProperty("fontScale") >= 0);
+
+    const QMetaObject &statisticsMeta =
+        viewmodel::StatisticsViewModel::staticMetaObject;
+    QVERIFY(statisticsMeta.indexOfProperty("todayCount") >= 0);
+    QVERIFY(statisticsMeta.indexOfProperty("trend") >= 0);
+    QVERIFY(statisticsMeta.indexOfEnumerator("TrendRange") >= 0);
+    QVERIFY(statisticsMeta.indexOfEnumerator("SemanticTone") >= 0);
+    QVERIFY(hasMetaMethod(statisticsMeta, QByteArrayLiteral("setRange")));
+    QVERIFY(hasMetaMethod(statisticsMeta, QByteArrayLiteral("reload")));
+    QVERIFY(hasMetaMethod(statisticsMeta,
+                          QByteArrayLiteral("notificationRaised")));
 }
 
 void ViewModelContractsTest::listImplementationsRespectTheItemModelProtocol()

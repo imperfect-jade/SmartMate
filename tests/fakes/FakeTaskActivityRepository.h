@@ -21,6 +21,7 @@ public:
         const QDateTime &startInclusiveUtc,
         const QDateTime &endExclusiveUtc) const override
     {
+        ++m_rangeQueryCount;
         throwIfNeeded();
         QList<model::TaskActivityEvent> result;
         for (const auto &event : m_events) {
@@ -56,6 +57,14 @@ public:
     }
 
     void setReadFailure(const bool enabled) noexcept { m_failReads = enabled; }
+    void setEvents(QList<model::TaskActivityEvent> events)
+    {
+        m_events = std::move(events);
+    }
+    [[nodiscard]] int rangeQueryCount() const noexcept
+    {
+        return m_rangeQueryCount;
+    }
 
 private:
     void throwIfNeeded() const
@@ -66,6 +75,7 @@ private:
     }
 
     QList<model::TaskActivityEvent> m_events;
+    mutable int m_rangeQueryCount{0};
     bool m_failReads{false};
 };
 

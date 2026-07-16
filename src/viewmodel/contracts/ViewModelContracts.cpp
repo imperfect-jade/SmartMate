@@ -4,3 +4,4 @@
 #include "viewmodel/contracts/TaskEditorContract.h"
 #include "viewmodel/contracts/TaskGraphContract.h"
 #include "viewmodel/contracts/TaskListContract.h"
+#include "viewmodel/contracts/StatisticsContract.h"

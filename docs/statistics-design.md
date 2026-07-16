@@ -1,6 +1,6 @@
 # SmartMate 数据统计设计
 
-> **实现状态**：Model 数据底座已经实现，包括 `TaskActivityEvent`、SQLite Schema v4、状态与事件原子写入、原始事件查询端口和 `StatisticsService`。Statistics ViewModel Contracts、具体 ViewModel、统计页面与 Qt Charts 依赖尚未实现，当前生产目标仍未链接 Qt Charts。
+> **实现状态**：Model 数据底座、Statistics ViewModel Contracts、具体 `StatisticsViewModel`、三个窄列表投影以及 `AppViewModel` 可选所有权已经实现。统计页面、Qt Charts 私有依赖、主窗口导航和 `src/app` 组合根注入尚未实现，当前生产目标仍未链接 Qt Charts。
 
 ## 1. 目标与第一版边界
 
@@ -191,7 +191,7 @@ smartmate_widgets → smartmate_common + smartmate_viewmodel_contracts
                   + Qt6::Widgets + Qt6::Charts
 ```
 
-当前只完成 Model 数据底座；Qt Charts 仍不是现有运行依赖，必须等 Widgets 统计页实现时再加入。
+当前已完成 Model 与 ViewModel 纵向投影；Qt Charts 仍不是现有运行依赖，必须等 Widgets 统计页实现时再加入。
 
 ## 5. 页面与交互
 
@@ -244,7 +244,7 @@ Chart 背景、绘图区、坐标文字、网格线和系列颜色由纯 View `W
 
 完成标准：全部公式无需启动 GUI 或 SQLite 即可通过 Fake Repository 独立测试。
 
-### 阶段 4：Contracts 与 ViewModel
+### 阶段 4：Contracts 与 ViewModel（已完成）
 
 - 实现 Statistics 页面/列表 Contracts、具体 ViewModel、范围会话状态和失效刷新；
 - 使用 `QSignalSpy`、`QAbstractItemModelTester` 验证初始 getter、稳定 Role 与精确通知。

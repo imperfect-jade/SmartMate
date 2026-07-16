@@ -79,11 +79,31 @@ scan_includes("${ROOT_DIR}/src/viewmodel/contracts" "ViewModel Contracts"
     "domain/" "services/" "repositories/" "persistence/"
     "appearance.*viewmodel" "task.*viewmodel" "appviewmodel"
     "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
-    "qtwidgets" "qwidget" "qdialog" "qgraphics")
+    "qtwidgets" "qwidget" "qdialog" "qgraphics"
+    "qtcharts" "qchart" "qbarseries" "qpieseries" "qhorizontalbarseries")
 
 scan_includes("${ROOT_DIR}/src/viewmodel" "ViewModel"
     "qtquick" "qquick" "qqmlengine" "qqmlcontext" "qtsql" "qsql"
-    "model/persistence" "view/")
+    "model/persistence" "view/"
+    "qtcharts" "qchart" "qbarseries" "qpieseries" "qhorizontalbarseries")
+
+# Charts 类型即使通过前置声明或间接 include 引入，也不得越过 View 边界。
+foreach(non_chart_root IN ITEMS
+        "${ROOT_DIR}/src/model"
+        "${ROOT_DIR}/src/viewmodel/contracts"
+        "${ROOT_DIR}/src/viewmodel")
+    file(GLOB_RECURSE non_chart_sources LIST_DIRECTORIES FALSE
+        "${non_chart_root}/*.h" "${non_chart_root}/*.hpp"
+        "${non_chart_root}/*.cpp" "${non_chart_root}/*.cc"
+        "${non_chart_root}/*.cxx")
+    foreach(source_file IN LISTS non_chart_sources)
+        file(READ "${source_file}" source_contents)
+        if(source_contents MATCHES "QChart|QBarSeries|QPieSeries|QHorizontalBarSeries|QtCharts")
+            record_violation("${source_file}"
+                "Qt Charts types are allowed only in the Qt Widgets View layer")
+        endif()
+    endforeach()
+endforeach()
 
 scan_includes("${ROOT_DIR}/src/view/widgets" "Qt Widgets View"
     "domain/" "services/" "repositories/" "persistence/"
@@ -124,7 +144,7 @@ if(EXISTS "${contracts_cmake}")
         record_violation("${contracts_cmake}"
             "smartmate_viewmodel_contracts must link smartmate_common and Qt Core")
     endif()
-    if(contracts_cmake_lower MATCHES "smartmate_model|smartmate_persistence|smartmate_viewmodel[ \t\r\n]|qt6::(qml|quick|sql|widgets)")
+    if(contracts_cmake_lower MATCHES "smartmate_model|smartmate_persistence|smartmate_viewmodel[ \t\r\n]|qt6::(qml|quick|sql|widgets|charts)")
         record_violation("${contracts_cmake}"
             "Contracts may not link Model, concrete ViewModel, persistence, QML, Quick, SQL, or Widgets")
     endif()
@@ -224,9 +244,9 @@ set(viewmodel_cmake "${ROOT_DIR}/src/viewmodel/CMakeLists.txt")
 if(EXISTS "${viewmodel_cmake}")
     file(READ "${viewmodel_cmake}" viewmodel_cmake_contents)
     string(TOLOWER "${viewmodel_cmake_contents}" viewmodel_cmake_lower)
-    if(viewmodel_cmake_lower MATCHES "qt6::(quick|sql)")
+    if(viewmodel_cmake_lower MATCHES "qt6::(quick|sql|charts)")
         record_violation("${viewmodel_cmake}"
-            "smartmate_viewmodel may not link Qt Quick or Qt SQL")
+            "smartmate_viewmodel may not link Qt Quick, Qt SQL, or Qt Charts")
     endif()
     if(viewmodel_cmake_lower MATCHES "smartmate_persistence")
         record_violation("${viewmodel_cmake}"

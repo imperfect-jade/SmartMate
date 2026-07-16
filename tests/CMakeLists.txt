@@ -206,6 +206,22 @@ target_link_libraries(tst_viewmodel_contracts
 )
 add_test(NAME viewmodel.contracts COMMAND tst_viewmodel_contracts)
 
+qt_add_executable(tst_statistics_viewmodel
+    viewmodel/tst_StatisticsViewModel.cpp
+    fakes/FakeTaskActivityRepository.h
+    fakes/FakeTaskRepository.h
+    fakes/FakeTaskDependencyRepository.h
+    fakes/FakeTaskCreationRepository.h
+    fakes/FakeTaskBatchTransitionRepository.h
+    fakes/FakeTaskDeletionRepository.h
+    fakes/FakeTaskCategoryRepository.h
+)
+target_include_directories(tst_statistics_viewmodel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_statistics_viewmodel
+    PRIVATE smartmate_viewmodel Qt6::Test
+)
+add_test(NAME viewmodel.statistics COMMAND tst_statistics_viewmodel)
+
 qt_add_executable(tst_settings_widgets
     widgets/tst_SettingsWidgets.cpp
 )
@@ -314,6 +330,7 @@ set(runtime_tests
     viewmodel.task_projection_sources
     viewmodel.appearance_settings
     viewmodel.contracts
+    viewmodel.statistics
     view.widgets_settings
     view.widgets_tasks
     view.widgets_graph

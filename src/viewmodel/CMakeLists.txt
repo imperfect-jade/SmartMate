@@ -1,6 +1,10 @@
 add_library(smartmate_viewmodel STATIC
     AppViewModel.h
     AppViewModel.cpp
+    StatisticsViewModel.h
+    StatisticsViewModel.cpp
+    StatisticsProjectionModels.h
+    StatisticsProjectionModels.cpp
     AppearanceSettingsViewModel.h
     AppearanceSettingsViewModel.cpp
     TaskEditorViewModel.h
