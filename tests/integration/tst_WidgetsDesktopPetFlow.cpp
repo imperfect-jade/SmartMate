@@ -12,6 +12,8 @@
 #include "view/widgets/pet/DesktopPetTaskPopup.h"
 
 #include <QApplication>
+#include <QColor>
+#include <QImage>
 #include <QLabel>
 #include <QPushButton>
 #include <QTest>
@@ -98,6 +100,22 @@ void WidgetsDesktopPetFlowTest::popupStartsAndCompletesStableFocusedTask()
                  viewmodel::TaskFocusContract::FocusState::Suggested);
     popup.showNextTo({500, 500, 96, 104});
     QTRY_VERIFY(start->isVisible());
+    const QImage popupImage = popup.grab().toImage().convertToFormat(
+        QImage::Format_ARGB32);
+    const QColor expectedBackground{QStringLiteral("#fffdf8")};
+    qsizetype opaqueBackgroundPixels = 0;
+    for (int y = 0; y < popupImage.height(); ++y) {
+        for (int x = 0; x < popupImage.width(); ++x) {
+            const QColor pixel = popupImage.pixelColor(x, y);
+            if (pixel.alpha() > 240
+                && qAbs(pixel.red() - expectedBackground.red()) <= 3
+                && qAbs(pixel.green() - expectedBackground.green()) <= 3
+                && qAbs(pixel.blue() - expectedBackground.blue()) <= 3) {
+                ++opaqueBackgroundPixels;
+            }
+        }
+    }
+    QVERIFY(opaqueBackgroundPixels > popupImage.width() * popupImage.height() / 4);
     QCOMPARE(title->text(), draft.title);
     const QString stableId = app.taskFocus()->focusTaskId();
     QVERIFY(!stableId.isEmpty());

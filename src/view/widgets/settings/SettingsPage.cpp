@@ -26,6 +26,8 @@ QLabel *createLabel(const QString &text, const char *objectName = nullptr)
         label->setObjectName(QString::fromLatin1(objectName));
     }
     label->setWordWrap(true);
+    // 自动换行标签必须向父布局报告真实高度，避免窄宽度或大字号时覆盖后续控件。
+    label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
     return label;
 }
 
@@ -101,7 +103,7 @@ SettingsPage::SettingsPage(
     auto *cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(20, 20, 20, 20);
     cardLayout->setSpacing(12);
-    contentLayout->addWidget(card, 0, Qt::AlignLeft);
+    contentLayout->addWidget(card);
 
     cardLayout->addWidget(createLabel(tr("外观"), "sectionTitle"));
     cardLayout->addWidget(createLabel(tr("强调颜色")));
@@ -169,6 +171,7 @@ SettingsPage::SettingsPage(
         auto *petLayout = new QVBoxLayout(petCard);
         petLayout->setContentsMargins(20, 20, 20, 20);
         petLayout->setSpacing(10);
+        petLayout->setSizeConstraint(QLayout::SetMinimumSize);
         petLayout->addWidget(createLabel(tr("桌宠"), "sectionTitle"));
         petLayout->addWidget(createLabel(
             tr("在普通窗口显示趴卧的三花猫，最小化后显示可拖动的悬浮桌宠。"),
@@ -177,7 +180,7 @@ SettingsPage::SettingsPage(
         m_desktopPetCheckBox->setObjectName(
             QStringLiteral("desktopPetEnabledCheckBox"));
         petLayout->addWidget(m_desktopPetCheckBox);
-        contentLayout->addWidget(petCard, 0, Qt::AlignLeft);
+        contentLayout->addWidget(petCard);
 
         const auto syncPetEnabled = [this] {
             const QSignalBlocker blocker{m_desktopPetCheckBox};

@@ -11,6 +11,7 @@ class DesktopPetWidgetsTest final : public QObject {
 private slots:
     void normalizedGeometryRoundTripsAndClamps();
     void popupPrefersLeftThenFallsBackRight();
+    void attachedPetUsesVisualContactLineAndClamps();
     void spritesheetLoadsAndTimerStopsWhenHidden();
 };
 
@@ -35,6 +36,20 @@ void DesktopPetWidgetsTest::popupPrefersLeftThenFallsBackRight()
         screen, {10, 500, 96, 104}, {340, 180});
     QCOMPARE(fallback.x(), 114);
     QCOMPARE(fallback.y(), 461);
+}
+
+void DesktopPetWidgetsTest::attachedPetUsesVisualContactLineAndClamps()
+{
+    const QRect screen{0, 0, 1920, 1080};
+    const QSize pet{96, 104};
+    const QRect mainFrame{200, 220, 1180, 760};
+    const QPoint anchored = attachedPetPosition(mainFrame, pet, screen);
+    QCOMPARE(anchored.y() + 90, mainFrame.top() + 12);
+    QCOMPARE(anchored.x(), mainFrame.right() - 168 - pet.width() + 1);
+
+    const QRect nearTop{200, 20, 1180, 760};
+    const QPoint clamped = attachedPetPosition(nearTop, pet, screen);
+    QCOMPARE(clamped.y(), screen.top());
 }
 
 void DesktopPetWidgetsTest::spritesheetLoadsAndTimerStopsWhenHidden()

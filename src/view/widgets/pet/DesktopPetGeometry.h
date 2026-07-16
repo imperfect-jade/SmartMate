@@ -24,5 +24,12 @@ namespace smartmate::view::widgets::pet {
                                        const QRect &petGeometry,
                                        const QSize &popupSize,
                                        int gap = 8);
+/// 按精灵视觉接触线把趴卧桌宠锚定到主窗口上边缘，并避开系统按钮。
+[[nodiscard]] QPoint attachedPetPosition(const QRect &mainFrame,
+                                         const QSize &petWindowSize,
+                                         const QRect &availableGeometry,
+                                         int contactLineY = 90,
+                                         int overlap = 12,
+                                         int rightClearance = 168);
 
 } // namespace smartmate::view::widgets::pet

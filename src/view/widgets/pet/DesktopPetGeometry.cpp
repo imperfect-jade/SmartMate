@@ -60,4 +60,17 @@ QPoint taskPopupPosition(const QRect &availableGeometry,
     return clampTopLeft({x, y}, popupSize, availableGeometry);
 }
 
+QPoint attachedPetPosition(const QRect &mainFrame,
+                           const QSize &petWindowSize,
+                           const QRect &availableGeometry,
+                           const int contactLineY,
+                           const int overlap,
+                           const int rightClearance)
+{
+    const QPoint desired{
+        mainFrame.right() - rightClearance - petWindowSize.width() + 1,
+        mainFrame.top() + overlap - contactLineY};
+    return clampTopLeft(desired, petWindowSize, availableGeometry);
+}
+
 } // namespace smartmate::view::widgets::pet

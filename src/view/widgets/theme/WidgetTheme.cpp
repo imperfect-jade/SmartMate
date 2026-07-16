@@ -117,7 +117,7 @@ QString WidgetTheme::styleSheet() const
             background: %1; color: %2;
         }
         QFrame#navigationPanel { background: %3; border-right: 1px solid %4; }
-        QFrame#settingsCard, QFrame#previewCard {
+        QFrame#settingsCard, QFrame#desktopPetSettingsCard, QFrame#previewCard {
             background: %5; border: 1px solid %4; border-radius: 10px;
         }
         QFrame#previewCard { background: %6; }

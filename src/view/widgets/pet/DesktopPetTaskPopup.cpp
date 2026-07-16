@@ -9,6 +9,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QScreen>
 #include <QTimer>
@@ -19,7 +20,7 @@ namespace smartmate::view::widgets::pet {
 DesktopPetTaskPopup::DesktopPetTaskPopup(
     viewmodel::TaskFocusContract &focus,
     viewmodel::TaskListContract &tasks, QWidget *parent)
-    : QWidget(parent, Qt::Tool | Qt::FramelessWindowHint
+    : QFrame(parent, Qt::Tool | Qt::FramelessWindowHint
                           | Qt::WindowStaysOnTopHint)
     , m_focus(focus)
     , m_tasks(tasks)
@@ -34,6 +35,8 @@ DesktopPetTaskPopup::DesktopPetTaskPopup(
 {
     setObjectName(QStringLiteral("desktopPetTaskPopup"));
     setAttribute(Qt::WA_TranslucentBackground);
+    // QFrame 配合 WA_StyledBackground 确保顶层透明窗口仍绘制不透明气泡表面。
+    setAttribute(Qt::WA_StyledBackground);
     setAttribute(Qt::WA_ShowWithoutActivating);
     setFixedWidth(340);
     setStyleSheet(QStringLiteral(
@@ -131,7 +134,18 @@ bool DesktopPetTaskPopup::eventFilter(QObject *watched, QEvent *event)
             hide();
         }
     }
-    return QWidget::eventFilter(watched, event);
+    return QFrame::eventFilter(watched, event);
+}
+
+void DesktopPetTaskPopup::paintEvent(QPaintEvent *)
+{
+    // 透明顶层窗口在部分平台不会自动绘制 QSS 背景，因此显式绘制气泡表面。
+    QPainter painter{this};
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen{QColor{QStringLiteral("#d9d2c3")}, 1.0});
+    painter.setBrush(QColor{QStringLiteral("#fffdf8")});
+    painter.drawRoundedRect(QRectF{rect()}.adjusted(0.5, 0.5, -0.5, -0.5),
+                            12.0, 12.0);
 }
 
 void DesktopPetTaskPopup::refresh()

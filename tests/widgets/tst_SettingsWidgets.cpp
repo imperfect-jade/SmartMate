@@ -148,6 +148,7 @@ private slots:
     void fontScaleOptionsApplyDistinctNonAccumulatingSizes();
     void accentSwitchPreservesAppliedChildFont();
     void desktopPetToggleUsesContractWithoutWriteBack();
+    void desktopPetCardRemainsReadableAtNarrowWidthAndLargeFont();
 };
 
 void SettingsWidgetsTest::initialStateAndNavigationAreSynchronized()
@@ -344,6 +345,39 @@ void SettingsWidgetsTest::desktopPetToggleUsesContractWithoutWriteBack()
     emit pet.enabledChanged();
     QVERIFY(toggle->isChecked());
     QCOMPARE(pet.setEnabledCount, 1);
+}
+
+void SettingsWidgetsTest::desktopPetCardRemainsReadableAtNarrowWidthAndLargeFont()
+{
+    FakeAppearanceSettingsContract appearance;
+    FakeDesktopPetSettingsContract pet;
+    SettingsPage page{appearance, pet};
+    QFont enlarged = page.font();
+    enlarged.setPointSizeF(enlarged.pointSizeF() * 1.25);
+    page.setFont(enlarged);
+    page.resize(350, 620);
+    page.show();
+    QCoreApplication::processEvents();
+
+    auto *card = requiredChild<QFrame>(page, "desktopPetSettingsCard");
+    auto *toggle = requiredChild<QCheckBox>(page, "desktopPetEnabledCheckBox");
+    QLabel *description = nullptr;
+    const auto secondaryLabels = card->findChildren<QLabel *>(
+        QStringLiteral("secondaryText"));
+    for (QLabel *label : secondaryLabels) {
+        if (label->text().contains(QStringLiteral("普通窗口"))) {
+            description = label;
+            break;
+        }
+    }
+    QVERIFY(description != nullptr);
+    const QRect descriptionRect{description->mapTo(card, QPoint{}),
+                                description->size()};
+    const QRect toggleRect{toggle->mapTo(card, QPoint{}), toggle->size()};
+    QVERIFY(card->width() >= page.width() - 110);
+    QVERIFY(card->rect().contains(descriptionRect));
+    QVERIFY(card->rect().contains(toggleRect));
+    QVERIFY(descriptionRect.bottom() < toggleRect.top());
 }
 
 QTEST_MAIN(SettingsWidgetsTest)

@@ -2,7 +2,7 @@
 
 #include "common/presentation/UiNotification.h"
 
-#include <QWidget>
+#include <QFrame>
 
 class QLabel;
 class QPushButton;
@@ -16,7 +16,7 @@ class TaskListContract;
 namespace smartmate::view::widgets::pet {
 
 /// 悬浮桌宠的轻量任务气泡，只读取焦点 Contract 并转发稳定 TaskId 命令。
-class DesktopPetTaskPopup final : public QWidget {
+class DesktopPetTaskPopup final : public QFrame {
     Q_OBJECT
 
 public:
@@ -32,6 +32,7 @@ signals:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
 
 private:
     void refresh();

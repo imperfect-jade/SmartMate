@@ -32,10 +32,8 @@ void AttachedDesktopPetWindow::updateAnchor(const QRect &mainFrame,
     if (screen == nullptr) {
         return;
     }
-    // 右侧预留原生标题栏按钮区域，底部 12 像素进入主窗口形成趴靠接触。
-    const QPoint desired{mainFrame.right() - 168 - width() + 1,
-                         mainFrame.top() - height() + 12};
-    move(clampTopLeft(desired, size(), screen->availableGeometry()));
+    // waiting 行在窗口底部包含透明留白，必须按视觉接触线而不是窗口底边定位。
+    move(attachedPetPosition(mainFrame, size(), screen->availableGeometry()));
 }
 
 bool AttachedDesktopPetWindow::assetReady() const noexcept
