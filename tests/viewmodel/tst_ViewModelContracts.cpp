@@ -1,4 +1,5 @@
 #include "AppearanceSettingsViewModel.h"
+#include "DesktopPetSettingsViewModel.h"
 #include "TaskCategoryViewModel.h"
 #include "TaskDependencyViewModel.h"
 #include "TaskEditorViewModel.h"
@@ -20,6 +21,7 @@
 #include "services/AppearanceSettingsService.h"
 #include "services/TaskService.h"
 #include "viewmodel/contracts/AppearanceSettingsContract.h"
+#include "viewmodel/contracts/DesktopPetSettingsContract.h"
 #include "viewmodel/contracts/TaskCategoryContract.h"
 #include "viewmodel/contracts/TaskDependencyContract.h"
 #include "viewmodel/contracts/TaskEditorContract.h"
@@ -41,6 +43,7 @@
 using namespace smartmate;
 
 static_assert(std::is_abstract_v<viewmodel::AppearanceSettingsContract>);
+static_assert(std::is_abstract_v<viewmodel::DesktopPetSettingsContract>);
 static_assert(std::is_abstract_v<viewmodel::TaskCategoryContract>);
 static_assert(std::is_abstract_v<viewmodel::TaskDependencyContract>);
 static_assert(std::is_abstract_v<viewmodel::TaskEditorContract>);
@@ -54,6 +57,7 @@ static_assert(std::is_abstract_v<viewmodel::StatisticsCategoryContract>);
 static_assert(std::is_abstract_v<viewmodel::StatisticsHealthContract>);
 
 static_assert(std::has_virtual_destructor_v<viewmodel::AppearanceSettingsContract>);
+static_assert(std::has_virtual_destructor_v<viewmodel::DesktopPetSettingsContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskCategoryContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskDependencyContract>);
 static_assert(std::has_virtual_destructor_v<viewmodel::TaskEditorContract>);
@@ -68,6 +72,8 @@ static_assert(std::has_virtual_destructor_v<viewmodel::StatisticsHealthContract>
 
 static_assert(std::is_base_of_v<viewmodel::AppearanceSettingsContract,
                                 viewmodel::AppearanceSettingsViewModel>);
+static_assert(std::is_base_of_v<viewmodel::DesktopPetSettingsContract,
+                                viewmodel::DesktopPetSettingsViewModel>);
 static_assert(std::is_base_of_v<viewmodel::TaskCategoryContract,
                                 viewmodel::TaskCategoryViewModel>);
 static_assert(std::is_base_of_v<viewmodel::TaskDependencyContract,
@@ -158,6 +164,14 @@ void ViewModelContractsTest::contractReferencesDispatchToConcreteImplementations
     viewmodel::AppearanceSettingsContract &appearanceContract = appearance;
     appearanceContract.setAccentThemeIndex(1);
     QCOMPARE(appearanceContract.accentThemeIndex(), 1);
+
+    viewmodel::DesktopPetSettingsViewModel desktopPet;
+    viewmodel::DesktopPetSettingsContract &desktopPetContract = desktopPet;
+    desktopPetContract.setEnabled(true);
+    QVERIFY(desktopPetContract.enabled());
+    desktopPetContract.saveFloatingPlacement(QStringLiteral("Screen A"),
+                                              0.2, 0.8);
+    QVERIFY(desktopPetContract.hasFloatingPlacement());
 
     TaskServiceFixture fixture;
     viewmodel::TaskListViewModel list{fixture.service, fixture.planSource,

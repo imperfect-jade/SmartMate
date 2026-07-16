@@ -7,6 +7,16 @@ add_library(smartmate_widgets STATIC
     binding/WidgetBinding.h
     settings/SettingsPage.h
     settings/SettingsPage.cpp
+    pet/DesktopPetGeometry.h
+    pet/DesktopPetGeometry.cpp
+    pet/DesktopPetSpriteWidget.h
+    pet/DesktopPetSpriteWidget.cpp
+    pet/DesktopPetTaskPopup.h
+    pet/DesktopPetTaskPopup.cpp
+    pet/AttachedDesktopPetWindow.h
+    pet/AttachedDesktopPetWindow.cpp
+    pet/FloatingDesktopPetWindow.h
+    pet/FloatingDesktopPetWindow.cpp
     task/TaskPage.h
     task/TaskPage.cpp
     task/TaskDragMime.h
@@ -42,6 +52,13 @@ add_library(smartmate_widgets STATIC
     graph/TaskGraphItems.cpp
     theme/WidgetTheme.h
     theme/WidgetTheme.cpp
+)
+
+qt_add_resources(smartmate_widgets desktop_pet_assets
+    PREFIX "/smartmate/pets"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/pet/assets"
+    FILES
+        pet/assets/calico-cat-spritesheet.png
 )
 
 target_include_directories(smartmate_widgets

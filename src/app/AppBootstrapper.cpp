@@ -1,9 +1,12 @@
 #include "AppBootstrapper.h"
 
 #include "AppViewModel.h"
+#include "DesktopPetSettingsViewModel.h"
 #include "persistence/SqliteTaskRepository.h"
 #include "persistence/QSettingsAppearanceRepository.h"
+#include "persistence/QSettingsDesktopPetRepository.h"
 #include "services/AppearanceSettingsService.h"
+#include "services/DesktopPetSettingsService.h"
 #include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 #include "services/StatisticsService.h"
@@ -39,6 +42,11 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
           std::make_unique<model::persistence::QSettingsAppearanceRepository>())
     , m_appearanceService(
           std::make_unique<model::AppearanceSettingsService>(*m_appearanceRepository))
+    , m_desktopPetRepository(
+          std::make_unique<model::persistence::QSettingsDesktopPetRepository>())
+    , m_desktopPetService(
+          std::make_unique<model::DesktopPetSettingsService>(
+              *m_desktopPetRepository))
 {
     // 在创建 ViewModel 和界面前验证任务数据源，避免应用带着失效 Service 启动。
     const model::TaskListResult initialTasks = m_taskService->listTasks();
@@ -85,6 +93,9 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
     m_appViewModel = std::make_unique<viewmodel::AppViewModel>(
         *m_taskService, *m_taskCategoryService,
         *m_statisticsService, *m_appearanceService);
+    m_desktopPetViewModel =
+        std::make_unique<viewmodel::DesktopPetSettingsViewModel>(
+            *m_desktopPetService);
 }
 
 AppBootstrapper::~AppBootstrapper() = default;
@@ -93,6 +104,7 @@ view::widgets::MainWindowDependencies AppBootstrapper::widgetDependencies() noex
 {
     // View 只接收窄 Contract，不会获得具体 ViewModel、Service 或 Repository。
     return {*m_appViewModel->appearanceSettings(),
+            *m_desktopPetViewModel,
             *m_appViewModel->taskList(),
             *m_appViewModel->taskFocus(),
             *m_appViewModel->taskDetails(),

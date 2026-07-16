@@ -4,19 +4,30 @@
 #include "view/widgets/task/TaskPage.h"
 #include "view/widgets/graph/DependencyGraphPage.h"
 #include "view/widgets/statistics/StatisticsPage.h"
+#include "view/widgets/pet/AttachedDesktopPetWindow.h"
+#include "view/widgets/pet/FloatingDesktopPetWindow.h"
 #include "view/widgets/theme/WidgetTheme.h"
 
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCoreApplication>
+#include <QCloseEvent>
+#include <QEvent>
 #include <QFrame>
+#include <QGuiApplication>
+#include <QHideEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMoveEvent>
 #include <QPushButton>
+#include <QScreen>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QVBoxLayout>
+#include <QWindowStateChangeEvent>
+#include <QTimer>
 
 namespace smartmate::view::widgets {
 namespace {
@@ -69,6 +80,7 @@ QString themedStyleSheet(const WidgetTheme &theme, const QFont &font)
 
 MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
     : MainWindow(dependencies.appearanceSettings,
+                 &dependencies.desktopPetSettings,
                  new TaskPage{{dependencies.taskList,
                                dependencies.taskFocus,
                                dependencies.taskDetails,
@@ -82,6 +94,37 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
                  new StatisticsPage{dependencies.statistics},
                  parent)
 {
+    m_attachedPet = std::make_unique<pet::AttachedDesktopPetWindow>(this);
+    m_floatingPet = std::make_unique<pet::FloatingDesktopPetWindow>(
+        dependencies.desktopPetSettings, dependencies.taskFocus,
+        dependencies.taskList);
+    connect(&dependencies.desktopPetSettings,
+            &viewmodel::DesktopPetSettingsContract::enabledChanged,
+            this, &MainWindow::syncDesktopPetVisibility);
+    connect(&dependencies.desktopPetSettings,
+            &viewmodel::DesktopPetSettingsContract::floatingPlacementChanged,
+            this, [this] {
+                if (m_floatingPet != nullptr && isMinimized()) {
+                    m_floatingPet->restorePosition(mainWindowScreen());
+                }
+            });
+    connect(&dependencies.desktopPetSettings,
+            &viewmodel::DesktopPetSettingsContract::notificationRaised,
+            this, &MainWindow::showNotification);
+    connect(m_floatingPet.get(),
+            &pet::FloatingDesktopPetWindow::openMainWindowRequested,
+            this, &MainWindow::openFromDesktopPet);
+    for (QScreen *screen : QGuiApplication::screens()) {
+        connectDesktopPetScreenSignals(screen);
+    }
+    connect(qApp, &QGuiApplication::screenAdded, this,
+            [this](QScreen *screen) {
+                connectDesktopPetScreenSignals(screen);
+                QTimer::singleShot(0, this,
+                    &MainWindow::syncDesktopPetVisibility);
+            });
+    connect(qApp, &QGuiApplication::screenRemoved, this,
+            [this] { QTimer::singleShot(0, this, &MainWindow::syncDesktopPetVisibility); });
     auto *taskPage = qobject_cast<TaskPage *>(m_pages->widget(0));
     connect(taskPage, &TaskPage::showDependencyGraphRequested, m_pages,
             [this] { m_pages->setCurrentIndex(1); });
@@ -107,11 +150,13 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
     connect(&dependencies.statistics,
             &viewmodel::StatisticsContract::notificationRaised,
             this, &MainWindow::showNotification);
+    syncDesktopPetVisibility();
 }
 
 MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
                        QWidget *parent)
     : MainWindow(appearanceSettings,
+                 nullptr,
                  migrationPlaceholder(tr("任务"), tr("任务页面未注入测试依赖。")),
                  migrationPlaceholder(tr("依赖图"), tr("依赖图页面未注入测试依赖。")),
                  migrationPlaceholder(tr("统计"), tr("统计页面未注入测试依赖。")),
@@ -120,10 +165,12 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
 }
 
 MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
+                       viewmodel::DesktopPetSettingsContract *desktopPetSettings,
                        QWidget *taskPage, QWidget *graphPage,
                        QWidget *statisticsPage, QWidget *parent)
     : QMainWindow(parent)
     , m_appearanceSettings(appearanceSettings)
+    , m_desktopPetSettings(desktopPetSettings)
     , m_baselineFont(QApplication::font())
     , m_pages(new QStackedWidget(this))
     , m_navigation(new QFrame(this))
@@ -184,7 +231,12 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
     m_pages->addWidget(taskPage);
     m_pages->addWidget(graphPage);
     m_pages->addWidget(statisticsPage);
-    m_pages->addWidget(new SettingsPage{appearanceSettings, m_pages});
+    if (desktopPetSettings != nullptr) {
+        m_pages->addWidget(
+            new SettingsPage{appearanceSettings, *desktopPetSettings, m_pages});
+    } else {
+        m_pages->addWidget(new SettingsPage{appearanceSettings, m_pages});
+    }
 
     // 导航是纯 View 会话状态，只切换页面索引，不写入任何业务对象。
     connect(navigationGroup, &QButtonGroup::idClicked, m_pages,
@@ -204,10 +256,56 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
     applyNavigationMode();
 }
 
+MainWindow::~MainWindow() = default;
+
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
     applyNavigationMode();
+    updateAttachedPetAnchor();
+}
+
+void MainWindow::moveEvent(QMoveEvent *event)
+{
+    QMainWindow::moveEvent(event);
+    updateAttachedPetAnchor();
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    QTimer::singleShot(0, this, &MainWindow::syncDesktopPetVisibility);
+}
+
+void MainWindow::hideEvent(QHideEvent *event)
+{
+    QMainWindow::hideEvent(event);
+    QTimer::singleShot(0, this, &MainWindow::syncDesktopPetVisibility);
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    m_closing = true;
+    if (m_attachedPet != nullptr) {
+        m_attachedPet->hide();
+    }
+    if (m_floatingPet != nullptr) {
+        m_floatingPet->hide();
+    }
+    QMainWindow::closeEvent(event);
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::WindowStateChange) {
+        auto *stateEvent = static_cast<QWindowStateChangeEvent *>(event);
+        if (!stateEvent->oldState().testFlag(Qt::WindowMinimized)) {
+            m_restoreWindowState = stateEvent->oldState()
+                & ~Qt::WindowMinimized;
+        }
+        QTimer::singleShot(0, this, &MainWindow::syncDesktopPetVisibility);
+    }
+    QMainWindow::changeEvent(event);
 }
 
 void MainWindow::applyNavigationMode()
@@ -240,6 +338,95 @@ void MainWindow::applyAppearance()
     setStyleSheet(themedStyleSheet(theme, targetFont));
     setFont(m_baselineFont);
     setFont(targetFont);
+}
+
+void MainWindow::syncDesktopPetVisibility()
+{
+    if (m_desktopPetSettings == nullptr || m_attachedPet == nullptr
+        || m_floatingPet == nullptr) {
+        return;
+    }
+    const bool unavailable = m_closing || !m_desktopPetSettings->enabled()
+        || ((!isVisible()) && !isMinimized())
+        || !m_attachedPet->assetReady() || !m_floatingPet->assetReady();
+    if (unavailable) {
+        m_attachedPet->hide();
+        m_floatingPet->hide();
+        return;
+    }
+
+    if (isMinimized()) {
+        m_attachedPet->hide();
+        m_floatingPet->restorePosition(mainWindowScreen());
+        m_floatingPet->show();
+        m_floatingPet->raise();
+        return;
+    }
+
+    m_floatingPet->hide();
+    if (isMaximized() || isFullScreen()) {
+        m_attachedPet->hide();
+        return;
+    }
+    updateAttachedPetAnchor();
+    m_attachedPet->show();
+    m_attachedPet->raise();
+}
+
+void MainWindow::updateAttachedPetAnchor()
+{
+    if (!isMinimized()) {
+        if (QScreen *screen = QGuiApplication::screenAt(frameGeometry().center())) {
+            m_lastMainScreenName = screen->name();
+        }
+    }
+    if (m_attachedPet != nullptr) {
+        m_attachedPet->updateAnchor(frameGeometry(), mainWindowScreen());
+    }
+}
+
+void MainWindow::openFromDesktopPet()
+{
+    const Qt::WindowStates target = m_restoreWindowState
+        & ~Qt::WindowMinimized;
+    if (target.testFlag(Qt::WindowFullScreen)) {
+        showFullScreen();
+    } else if (target.testFlag(Qt::WindowMaximized)) {
+        showMaximized();
+    } else {
+        showNormal();
+    }
+    raise();
+    activateWindow();
+    QTimer::singleShot(0, this, &MainWindow::syncDesktopPetVisibility);
+}
+
+QScreen *MainWindow::mainWindowScreen() const
+{
+    QScreen *screen = QGuiApplication::screenAt(frameGeometry().center());
+    if (screen != nullptr) {
+        return screen;
+    }
+    for (QScreen *candidate : QGuiApplication::screens()) {
+        if (candidate->name() == m_lastMainScreenName) {
+            return candidate;
+        }
+    }
+    return QGuiApplication::primaryScreen();
+}
+
+void MainWindow::connectDesktopPetScreenSignals(QScreen *screen)
+{
+    if (screen == nullptr) {
+        return;
+    }
+    const auto resync = [this] {
+        QTimer::singleShot(0, this, &MainWindow::syncDesktopPetVisibility);
+    };
+    connect(screen, &QScreen::geometryChanged, this, resync);
+    connect(screen, &QScreen::availableGeometryChanged, this, resync);
+    connect(screen, &QScreen::logicalDotsPerInchChanged, this,
+            [resync](qreal) { resync(); });
 }
 
 void MainWindow::showNotification(const common::UiNotification &notification)

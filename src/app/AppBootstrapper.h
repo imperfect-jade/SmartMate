@@ -9,15 +9,18 @@ class TaskService;
 class TaskCategoryService;
 class StatisticsService;
 class AppearanceSettingsService;
+class DesktopPetSettingsService;
 
 namespace persistence {
 class SqliteTaskRepository;
 class QSettingsAppearanceRepository;
+class QSettingsDesktopPetRepository;
 }
 } // namespace smartmate::model
 
 namespace smartmate::viewmodel {
 class AppViewModel;
+class DesktopPetSettingsViewModel;
 }
 
 namespace smartmate::view::widgets {
@@ -54,8 +57,15 @@ private:
         m_appearanceRepository;
     /// 外观设置的校验和保存入口。
     std::unique_ptr<model::AppearanceSettingsService> m_appearanceService;
+    /// 桌宠轻量设置使用独立 QSettings Repository 与 Service。
+    std::unique_ptr<model::persistence::QSettingsDesktopPetRepository>
+        m_desktopPetRepository;
+    std::unique_ptr<model::DesktopPetSettingsService> m_desktopPetService;
     /// 拥有全部具体 ViewModel，并向 View 暴露对应的抽象 Contract。
     std::unique_ptr<viewmodel::AppViewModel> m_appViewModel;
+    /// 桌宠设置投影独立于任务 ViewModel 聚合，但由同一组合根管理生命周期。
+    std::unique_ptr<viewmodel::DesktopPetSettingsViewModel>
+        m_desktopPetViewModel;
 };
 
 } // namespace smartmate::app

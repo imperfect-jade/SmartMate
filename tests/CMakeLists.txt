@@ -114,6 +114,14 @@ target_include_directories(tst_statistics_service PRIVATE ${CMAKE_CURRENT_SOURCE
 target_link_libraries(tst_statistics_service PRIVATE smartmate_model Qt6::Test)
 add_test(NAME model.statistics_service COMMAND tst_statistics_service)
 
+qt_add_executable(tst_desktop_pet_settings_service
+    model/tst_DesktopPetSettingsService.cpp
+    fakes/FakeDesktopPetSettingsRepository.h
+)
+target_include_directories(tst_desktop_pet_settings_service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_desktop_pet_settings_service PRIVATE smartmate_model Qt6::Test)
+add_test(NAME model.desktop_pet_settings COMMAND tst_desktop_pet_settings_service)
+
 qt_add_executable(tst_sqlite_task_repository
     persistence/tst_SqliteTaskRepository.cpp
 )
@@ -138,6 +146,15 @@ target_link_libraries(tst_qsettings_appearance_repository
 )
 add_test(NAME persistence.appearance_settings
          COMMAND tst_qsettings_appearance_repository)
+
+qt_add_executable(tst_qsettings_desktop_pet_repository
+    persistence/tst_QSettingsDesktopPetRepository.cpp
+)
+target_link_libraries(tst_qsettings_desktop_pet_repository
+    PRIVATE smartmate_persistence Qt6::Test
+)
+add_test(NAME persistence.desktop_pet_settings
+         COMMAND tst_qsettings_desktop_pet_repository)
 
 qt_add_executable(tst_task_viewmodels
     viewmodel/tst_TaskViewModels.cpp
@@ -190,6 +207,16 @@ target_include_directories(tst_appearance_settings PRIVATE ${CMAKE_CURRENT_SOURC
 target_link_libraries(tst_appearance_settings PRIVATE smartmate_viewmodel Qt6::Test)
 add_test(NAME viewmodel.appearance_settings COMMAND tst_appearance_settings)
 
+qt_add_executable(tst_desktop_pet_settings_viewmodel
+    viewmodel/tst_DesktopPetSettingsViewModel.cpp
+    fakes/FakeDesktopPetSettingsRepository.h
+)
+target_include_directories(tst_desktop_pet_settings_viewmodel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_desktop_pet_settings_viewmodel
+    PRIVATE smartmate_viewmodel Qt6::Test
+)
+add_test(NAME viewmodel.desktop_pet_settings COMMAND tst_desktop_pet_settings_viewmodel)
+
 qt_add_executable(tst_viewmodel_contracts
     viewmodel/tst_ViewModelContracts.cpp
     fakes/FakeAppearanceSettingsRepository.h
@@ -230,6 +257,16 @@ target_link_libraries(tst_settings_widgets
 )
 add_test(NAME view.widgets_settings COMMAND tst_settings_widgets -platform offscreen)
 set_tests_properties(view.widgets_settings PROPERTIES TIMEOUT 15)
+
+qt_add_executable(tst_desktop_pet_widgets
+    widgets/tst_DesktopPetWidgets.cpp
+)
+target_link_libraries(tst_desktop_pet_widgets
+    PRIVATE smartmate_widgets Qt6::Test
+)
+add_test(NAME view.widgets_desktop_pet
+    COMMAND tst_desktop_pet_widgets -platform offscreen)
+set_tests_properties(view.widgets_desktop_pet PROPERTIES TIMEOUT 15)
 
 qt_add_executable(tst_task_widgets
     widgets/tst_TaskWidgets.cpp
@@ -311,6 +348,19 @@ add_test(NAME integration.widgets_statistics
     COMMAND tst_widgets_statistics_flow -platform offscreen)
 set_tests_properties(integration.widgets_statistics PROPERTIES TIMEOUT 30)
 
+qt_add_executable(tst_widgets_desktop_pet_flow
+    integration/tst_WidgetsDesktopPetFlow.cpp
+    fakes/FakeAppearanceSettingsRepository.h
+    fakes/FakeDesktopPetSettingsRepository.h
+)
+target_include_directories(tst_widgets_desktop_pet_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_widgets_desktop_pet_flow
+    PRIVATE smartmate_widgets smartmate_persistence smartmate_viewmodel Qt6::Test
+)
+add_test(NAME integration.widgets_desktop_pet
+    COMMAND tst_widgets_desktop_pet_flow -platform offscreen)
+set_tests_properties(integration.widgets_desktop_pet PROPERTIES TIMEOUT 30)
+
 qt_add_executable(tst_task_creation_flow
     integration/tst_TaskCreationFlow.cpp
 )
@@ -348,15 +398,19 @@ set(runtime_tests
     model.task_state_transitions
     model.task_ordering
     model.statistics_service
+    model.desktop_pet_settings
     persistence.sqlite_task_repository
     persistence.appearance_settings
+    persistence.desktop_pet_settings
     viewmodel.task_viewmodels
     viewmodel.task_presentation
     viewmodel.task_projection_sources
     viewmodel.appearance_settings
+    viewmodel.desktop_pet_settings
     viewmodel.contracts
     viewmodel.statistics
     view.widgets_settings
+    view.widgets_desktop_pet
     view.widgets_tasks
     view.widgets_graph
     view.widgets_statistics
@@ -365,6 +419,7 @@ set(runtime_tests
     integration.widgets_category_dependencies
     integration.widgets_graph
     integration.widgets_statistics
+    integration.widgets_desktop_pet
     integration.task_creation_flow
     view.application_bootstrap
 )

@@ -7,6 +7,8 @@ add_library(smartmate_viewmodel STATIC
     StatisticsProjectionModels.cpp
     AppearanceSettingsViewModel.h
     AppearanceSettingsViewModel.cpp
+    DesktopPetSettingsViewModel.h
+    DesktopPetSettingsViewModel.cpp
     TaskEditorViewModel.h
     TaskEditorViewModel.cpp
     TaskEditorSessionCommands.cpp

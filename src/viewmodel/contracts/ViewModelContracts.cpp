@@ -1,4 +1,5 @@
 #include "viewmodel/contracts/AppearanceSettingsContract.h"
+#include "viewmodel/contracts/DesktopPetSettingsContract.h"
 #include "viewmodel/contracts/TaskCategoryContract.h"
 #include "viewmodel/contracts/TaskDependencyContract.h"
 #include "viewmodel/contracts/TaskEditorContract.h"

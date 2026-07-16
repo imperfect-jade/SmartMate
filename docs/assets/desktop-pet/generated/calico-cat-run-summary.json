@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "run_dir": "D:\\Codex\\SmartMate\\build\\hatch-pet\\calico-cat",
+  "spritesheet": "D:\\Codex\\SmartMate\\build\\hatch-pet\\calico-cat\\final\\spritesheet.webp",
+  "validation": "D:\\Codex\\SmartMate\\build\\hatch-pet\\calico-cat\\final\\validation.json",
+  "contact_sheet": "D:\\Codex\\SmartMate\\build\\hatch-pet\\calico-cat\\qa\\contact-sheet.png",
+  "review": "D:\\Codex\\SmartMate\\build\\hatch-pet\\calico-cat\\qa\\review.json",
+  "videos": null,
+  "package": "D:\\Codex\\SmartMate\\build\\hatch-pet\\calico-cat\\package"
+}

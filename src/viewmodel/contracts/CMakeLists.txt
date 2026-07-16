@@ -1,5 +1,6 @@
 add_library(smartmate_viewmodel_contracts STATIC
     AppearanceSettingsContract.h
+    DesktopPetSettingsContract.h
     TaskCategoryContract.h
     TaskDependencyContract.h
     TaskEditorContract.h

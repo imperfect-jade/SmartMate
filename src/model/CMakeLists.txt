@@ -1,6 +1,8 @@
 add_library(smartmate_model STATIC
     domain/AppearanceSettings.h
     domain/AppearanceSettings.cpp
+    domain/DesktopPetSettings.h
+    domain/DesktopPetSettings.cpp
     domain/Task.h
     domain/Task.cpp
     domain/TaskActivityEvent.h
@@ -28,6 +30,7 @@ add_library(smartmate_model STATIC
     statistics/StatisticsTypes.h
     repositories/RepositoryException.h
     repositories/IAppearanceSettingsRepository.h
+    repositories/IDesktopPetSettingsRepository.h
     repositories/ITaskActivityRepository.h
     repositories/ITaskTransitionRepository.h
     repositories/ITaskCreationRepository.h
@@ -55,6 +58,8 @@ add_library(smartmate_model STATIC
     services/TaskDraftValidator.cpp
     services/AppearanceSettingsService.h
     services/AppearanceSettingsService.cpp
+    services/DesktopPetSettingsService.h
+    services/DesktopPetSettingsService.cpp
 )
 
 target_include_directories(smartmate_model
