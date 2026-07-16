@@ -22,6 +22,8 @@ using smartmate::model::TaskId;
 using smartmate::model::TaskPriority;
 using smartmate::model::TaskStateChange;
 using smartmate::model::TaskStatus;
+using smartmate::model::TaskTransition;
+using smartmate::model::TaskTransitionWrite;
 using smartmate::model::persistence::SqliteTaskRepository;
 
 namespace {
@@ -54,6 +56,20 @@ Task makeTask(
         kCreatedAt,
         updatedAt,
         categoryId);
+}
+
+TaskTransitionWrite transitionWrite(TaskStateChange change,
+                                    const TaskTransition transition)
+{
+    smartmate::model::TaskActivityEvent event;
+    event.eventId = QUuid::createUuid();
+    event.taskId = change.taskId;
+    event.transition = transition;
+    event.fromStatus = change.expectedStatus;
+    event.toStatus = change.targetStatus;
+    event.occurredAtUtc = change.updatedAtUtc;
+    event.prioritySnapshot = TaskPriority::Normal;
+    return {std::move(change), std::move(event)};
 }
 
 void compareTasks(const Task &actual, const Task &expected)
@@ -280,6 +296,7 @@ private slots:
     void atomicCreationRollsBackOnTaskOrSelfDependencyConstraint();
     void batchStateChangesCommitAcrossReopen();
     void batchStateChangesRollBackOnConflictOrSqlFailure();
+    void activityEventsRoundTripAndCascadeOnPermanentDelete();
     void permanentlyDeletesArchivedTaskAndAllDependenciesAcrossReopen();
     void rejectsPermanentDeletionOfActiveOrMissingTaskAtomically();
     void permanentDeletionRollsBackAfterTaskDeleteFailure();
@@ -311,7 +328,7 @@ void SqliteTaskRepositoryTest::initializesSchemaIdempotently()
         QSqlQuery versionQuery(database);
         QVERIFY(versionQuery.exec(QStringLiteral("PRAGMA user_version")));
         QVERIFY(versionQuery.next());
-        QCOMPARE(versionQuery.value(0).toInt(), 3);
+        QCOMPARE(versionQuery.value(0).toInt(), 4);
 
         QSqlQuery indexQuery(database);
         QVERIFY(indexQuery.exec(QStringLiteral(
@@ -338,6 +355,17 @@ void SqliteTaskRepositoryTest::initializesSchemaIdempotently()
             "(type = 'trigger' AND name = 'trg_task_dependencies_prevent_cycle')")));
         QVERIFY(dependencySchemaQuery.next());
         QCOMPARE(dependencySchemaQuery.value(0).toInt(), 3);
+
+        QSqlQuery activitySchemaQuery(database);
+        QVERIFY(activitySchemaQuery.exec(QStringLiteral(
+            "SELECT COUNT(*) FROM sqlite_master WHERE "
+            "(type = 'table' AND name = 'task_activity_events') OR "
+            "(type = 'index' AND name IN ("
+            "'idx_task_activity_events_occurred', "
+            "'idx_task_activity_events_transition_occurred', "
+            "'idx_task_activity_events_task_occurred'))")));
+        QVERIFY(activitySchemaQuery.next());
+        QCOMPARE(activitySchemaQuery.value(0).toInt(), 4);
 
         QSqlQuery dependencyIndexQuery(database);
         QVERIFY(dependencyIndexQuery.exec(QStringLiteral(
@@ -397,6 +425,19 @@ void SqliteTaskRepositoryTest::stableSqlCodecsRoundTripEveryValue()
         QCOMPARE(taskCategoryColorToSqlText(value), text);
         QCOMPARE(taskCategoryColorFromSqlText(text), value);
     }
+
+    const QList<QPair<TaskTransition, QString>> transitions{
+        {TaskTransition::Start, QStringLiteral("start")},
+        {TaskTransition::Cancel, QStringLiteral("cancel")},
+        {TaskTransition::Complete, QStringLiteral("complete")},
+        {TaskTransition::Redo, QStringLiteral("redo")},
+        {TaskTransition::Archive, QStringLiteral("archive")},
+        {TaskTransition::Restore, QStringLiteral("restore")},
+    };
+    for (const auto &[value, text] : transitions) {
+        QCOMPARE(taskTransitionToSqlText(value), text);
+        QCOMPARE(taskTransitionFromSqlText(text), value);
+    }
 }
 
 void SqliteTaskRepositoryTest::stableSqlCodecsRejectInvalidValues()
@@ -421,6 +462,12 @@ void SqliteTaskRepositoryTest::stableSqlCodecsRejectInvalidValues()
     QVERIFY_EXCEPTION_THROWN(
         (void) taskCategoryColorFromSqlText(QStringLiteral("unknown")),
         RepositoryException);
+    QVERIFY_EXCEPTION_THROWN(
+        (void) taskTransitionToSqlText(static_cast<TaskTransition>(999)),
+        RepositoryException);
+    QVERIFY_EXCEPTION_THROWN(
+        (void) taskTransitionFromSqlText(QStringLiteral("unknown")),
+        RepositoryException);
 }
 
 void SqliteTaskRepositoryTest::migratesVersionOneWithoutChangingTaskData()
@@ -444,6 +491,8 @@ void SqliteTaskRepositoryTest::migratesVersionOneWithoutChangingTaskData()
         QVERIFY(migrated.has_value());
         compareTasks(*migrated, expected);
         QVERIFY(repository.findAllDependencies().isEmpty());
+        QVERIFY(repository.findEventsByOccurredAt(
+            kCreatedAt.addYears(-10), kUpdatedAt.addYears(10)).isEmpty());
     }
 
     const QString connectionName = uniqueConnectionName(QStringLiteral("verify_v2"));
@@ -455,7 +504,7 @@ void SqliteTaskRepositoryTest::migratesVersionOneWithoutChangingTaskData()
         QSqlQuery versionQuery(database);
         QVERIFY(versionQuery.exec(QStringLiteral("PRAGMA user_version")));
         QVERIFY(versionQuery.next());
-        QCOMPARE(versionQuery.value(0).toInt(), 3);
+        QCOMPARE(versionQuery.value(0).toInt(), 4);
 
         QSqlQuery foreignKeyQuery(database);
         QVERIFY(foreignKeyQuery.exec(QStringLiteral(
@@ -506,7 +555,7 @@ void SqliteTaskRepositoryTest::migratesVersionTwoWithoutChangingTasksOrDependenc
         QSqlQuery query(database);
         QVERIFY(query.exec(QStringLiteral("PRAGMA user_version")));
         QVERIFY(query.next());
-        QCOMPARE(query.value(0).toInt(), 3);
+        QCOMPARE(query.value(0).toInt(), 4);
         QVERIFY(query.exec(QStringLiteral("PRAGMA table_info(tasks)")));
         bool categoryColumnFound = false;
         while (query.next()) {
@@ -587,7 +636,7 @@ void SqliteTaskRepositoryTest::rejectsFutureSchemaVersion()
         database.setDatabaseName(databasePath);
         QVERIFY(database.open());
         QSqlQuery query(database);
-        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 4")));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 5")));
         database.close();
     }
     QSqlDatabase::removeDatabase(connectionName);
@@ -1179,14 +1228,19 @@ void SqliteTaskRepositoryTest::batchStateChangesCommitAcrossReopen()
         repository.insert(makeTask(cancelledId, QStringLiteral("批量归档取消任务"),
                                    TaskPriority::Normal, TaskStatus::Cancelled));
 
-        const auto result = repository.updateTaskStatesAtomically({
-            TaskStateChange{doneId, TaskStatus::Done, TaskStatus::Archived,
-                            TaskStatus::Done, batchUpdatedAt},
-            TaskStateChange{cancelledId, TaskStatus::Cancelled,
-                            TaskStatus::Archived, TaskStatus::Cancelled,
-                            batchUpdatedAt},
+        const auto result = repository.applyTransitionsAtomically({
+            transitionWrite(
+                TaskStateChange{doneId, TaskStatus::Done, TaskStatus::Archived,
+                                TaskStatus::Done, batchUpdatedAt},
+                TaskTransition::Archive),
+            transitionWrite(
+                TaskStateChange{cancelledId, TaskStatus::Cancelled,
+                                TaskStatus::Archived, TaskStatus::Cancelled,
+                                batchUpdatedAt},
+                TaskTransition::Archive),
         });
         QCOMPARE(result.updatedTaskCount, 2);
+        QCOMPARE(result.insertedEventCount, 2);
         QVERIFY(result.conflictingTaskIds.isEmpty());
     }
 
@@ -1206,11 +1260,15 @@ void SqliteTaskRepositoryTest::batchStateChangesCommitAcrossReopen()
                  std::optional<TaskStatus>{TaskStatus::Cancelled});
         QCOMPARE(cancelled->updatedAtUtc(), batchUpdatedAt);
 
-        const auto restored = repository.updateTaskStatesAtomically({
-            TaskStateChange{doneId, TaskStatus::Archived, TaskStatus::Done,
-                            std::nullopt, restoredAt},
-            TaskStateChange{cancelledId, TaskStatus::Archived,
-                            TaskStatus::Cancelled, std::nullopt, restoredAt},
+        const auto restored = repository.applyTransitionsAtomically({
+            transitionWrite(
+                TaskStateChange{doneId, TaskStatus::Archived, TaskStatus::Done,
+                                std::nullopt, restoredAt},
+                TaskTransition::Restore),
+            transitionWrite(
+                TaskStateChange{cancelledId, TaskStatus::Archived,
+                                TaskStatus::Cancelled, std::nullopt, restoredAt},
+                TaskTransition::Restore),
         });
         QCOMPARE(restored.updatedTaskCount, 2);
         QVERIFY(restored.conflictingTaskIds.isEmpty());
@@ -1247,16 +1305,22 @@ void SqliteTaskRepositoryTest::batchStateChangesRollBackOnConflictOrSqlFailure()
     repository.insert(makeTask(triggerId, QStringLiteral("SQL失败项"),
                                TaskPriority::Normal, TaskStatus::Done));
 
-    const auto conflictResult = repository.updateTaskStatesAtomically({
-        TaskStateChange{firstId, TaskStatus::Done, TaskStatus::Archived,
-                        TaskStatus::Done, kUpdatedAt.addSecs(60)},
-        TaskStateChange{conflictId, TaskStatus::Done, TaskStatus::Archived,
-                        TaskStatus::Done, kUpdatedAt.addSecs(60)},
+    const auto conflictResult = repository.applyTransitionsAtomically({
+        transitionWrite(
+            TaskStateChange{firstId, TaskStatus::Done, TaskStatus::Archived,
+                            TaskStatus::Done, kUpdatedAt.addSecs(60)},
+            TaskTransition::Archive),
+        transitionWrite(
+            TaskStateChange{conflictId, TaskStatus::Done, TaskStatus::Archived,
+                            TaskStatus::Done, kUpdatedAt.addSecs(60)},
+            TaskTransition::Archive),
     });
     QCOMPARE(conflictResult.updatedTaskCount, 0);
     QCOMPARE(conflictResult.conflictingTaskIds, QList<QUuid>{conflictId});
     QCOMPARE(repository.findById(firstId)->status(), TaskStatus::Done);
     QCOMPARE(repository.findById(conflictId)->status(), TaskStatus::Todo);
+    QVERIFY(repository.findEventsByOccurredAt(
+        kUpdatedAt, kUpdatedAt.addSecs(90)).isEmpty());
 
     const QString connectionName =
         uniqueConnectionName(QStringLiteral("batch_update_failure_trigger"));
@@ -1279,11 +1343,15 @@ void SqliteTaskRepositoryTest::batchStateChangesRollBackOnConflictOrSqlFailure()
 
     bool threw = false;
     try {
-        (void) repository.updateTaskStatesAtomically({
-            TaskStateChange{firstId, TaskStatus::Done, TaskStatus::Archived,
-                            TaskStatus::Done, kUpdatedAt.addSecs(120)},
-            TaskStateChange{triggerId, TaskStatus::Done, TaskStatus::Archived,
-                            TaskStatus::Done, kUpdatedAt.addSecs(120)},
+        (void) repository.applyTransitionsAtomically({
+            transitionWrite(
+                TaskStateChange{firstId, TaskStatus::Done, TaskStatus::Archived,
+                                TaskStatus::Done, kUpdatedAt.addSecs(120)},
+                TaskTransition::Archive),
+            transitionWrite(
+                TaskStateChange{triggerId, TaskStatus::Done, TaskStatus::Archived,
+                                TaskStatus::Done, kUpdatedAt.addSecs(120)},
+                TaskTransition::Archive),
         });
     } catch (const RepositoryException &) {
         threw = true;
@@ -1291,6 +1359,73 @@ void SqliteTaskRepositoryTest::batchStateChangesRollBackOnConflictOrSqlFailure()
     QVERIFY(threw);
     QCOMPARE(repository.findById(firstId)->status(), TaskStatus::Done);
     QCOMPARE(repository.findById(triggerId)->status(), TaskStatus::Done);
+    QVERIFY(repository.findEventsByOccurredAt(
+        kUpdatedAt, kUpdatedAt.addSecs(180)).isEmpty());
+}
+
+void SqliteTaskRepositoryTest::activityEventsRoundTripAndCascadeOnPermanentDelete()
+{
+    SqliteTaskRepository repository(QStringLiteral(":memory:"));
+    const TaskCategory category{QUuid::createUuid(),
+                                QStringLiteral("历史类别"),
+                                TaskCategoryColor::Violet,
+                                kCreatedAt,
+                                kUpdatedAt};
+    repository.insertCategory(category);
+    const TaskId taskId = QUuid::createUuid();
+    const QDateTime deadline = kUpdatedAt.addSecs(30);
+    repository.insert(makeTask(taskId,
+                               QStringLiteral("事件任务"),
+                               TaskPriority::Urgent,
+                               TaskStatus::InProgress,
+                               std::nullopt,
+                               deadline,
+                               75,
+                               kUpdatedAt,
+                               category.id));
+
+    TaskTransitionWrite completed = transitionWrite(
+        {taskId, TaskStatus::InProgress, TaskStatus::Done,
+         std::nullopt, kUpdatedAt.addSecs(10)},
+        TaskTransition::Complete);
+    completed.event.deadlineSnapshotUtc = deadline;
+    completed.event.estimatedMinutesSnapshot = 75;
+    completed.event.prioritySnapshot = TaskPriority::Urgent;
+    completed.event.categoryIdSnapshot = category.id;
+    completed.event.categoryNameSnapshot = category.name;
+    completed.event.categoryColorSnapshot = category.color;
+    const auto completeResult = repository.applyTransitionsAtomically({completed});
+    QCOMPARE(completeResult.updatedTaskCount, 1);
+    QCOMPARE(completeResult.insertedEventCount, 1);
+
+    TaskTransitionWrite archived = transitionWrite(
+        {taskId, TaskStatus::Done, TaskStatus::Archived,
+         TaskStatus::Done, kUpdatedAt.addSecs(20)},
+        TaskTransition::Archive);
+    const auto archiveResult = repository.applyTransitionsAtomically({archived});
+    QCOMPARE(archiveResult.updatedTaskCount, 1);
+    QCOMPARE(archiveResult.insertedEventCount, 1);
+
+    const auto events = repository.findEventsByOccurredAt(
+        kUpdatedAt, kUpdatedAt.addSecs(30));
+    QCOMPARE(events.size(), 2);
+    QCOMPARE(events.first().transition, TaskTransition::Complete);
+    QCOMPARE(events.first().deadlineSnapshotUtc,
+             std::optional<QDateTime>{deadline});
+    QCOMPARE(events.first().estimatedMinutesSnapshot,
+             std::optional<int>{75});
+    QCOMPARE(events.first().prioritySnapshot, TaskPriority::Urgent);
+    QCOMPARE(events.first().categoryNameSnapshot,
+             std::optional<QString>{category.name});
+    QCOMPARE(repository.findLatestCompletionBefore(kUpdatedAt.addSecs(30)),
+             std::optional{events.first()});
+
+    const auto deletion = repository.deleteArchivedTasksWithDependencies({taskId});
+    QCOMPARE(deletion.deletedTaskCount, 1);
+    QVERIFY(repository.findEventsByOccurredAt(
+        kUpdatedAt, kUpdatedAt.addSecs(30)).isEmpty());
+    QVERIFY(!repository.findLatestCompletionBefore(
+        kUpdatedAt.addSecs(30)).has_value());
 }
 
 void SqliteTaskRepositoryTest::permanentlyDeletesArchivedTaskAndAllDependenciesAcrossReopen()

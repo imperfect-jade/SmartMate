@@ -19,6 +19,9 @@
 #include <utility>
 
 using smartmate::model::Task;
+using smartmate::model::TaskCategory;
+using smartmate::model::TaskCategoryColor;
+using smartmate::model::TaskCategoryId;
 using smartmate::model::TaskCreationRequest;
 using smartmate::model::TaskDraft;
 using smartmate::model::TaskError;
@@ -26,6 +29,7 @@ using smartmate::model::TaskId;
 using smartmate::model::TaskPriority;
 using smartmate::model::TaskService;
 using smartmate::model::TaskStatus;
+using smartmate::model::TaskTransition;
 using smartmate::tests::FakeTaskDependencyRepository;
 using smartmate::tests::FakeTaskCreationRepository;
 using smartmate::tests::FakeTaskBatchTransitionRepository;
@@ -119,6 +123,7 @@ private slots:
     void buildsDependencyEditContextInModel();
     void rejectsDependencyEditContextForNonTodoTarget();
     void keepsPlanAndGraphCommandAvailabilityConsistent();
+    void recordsImmutableActivityEventForEverySuccessfulTransition();
 };
 
 void TaskServiceTest::listsAndFindsTasks()
@@ -1525,6 +1530,67 @@ void TaskServiceTest::keepsPlanAndGraphCommandAvailabilityConsistent()
         QVERIFY(planned != plan.value->cend());
         QCOMPARE(node.availability, planned->availability);
     }
+}
+
+void TaskServiceTest::recordsImmutableActivityEventForEverySuccessfulTransition()
+{
+    const QDateTime deadline = timestamp().addDays(2);
+    const TaskCategory category{QUuid::createUuid(),
+                                QStringLiteral("学习"),
+                                TaskCategoryColor::Violet,
+                                timestamp(),
+                                timestamp()};
+    const Task primary{QUuid::createUuid(),
+                       QStringLiteral("事件主任务"),
+                       {},
+                       TaskPriority::Urgent,
+                       TaskStatus::InProgress,
+                       std::nullopt,
+                       deadline,
+                       45,
+                       timestamp(),
+                       timestamp(),
+                       category.id};
+    const Task cancelled = storedTask(TaskStatus::Todo);
+    FakeTaskRepository repository{{primary, cancelled}};
+    FakeTaskDependencyRepository dependencyRepository;
+    FakeTaskCreationRepository creationRepository{repository, dependencyRepository};
+    FakeTaskBatchTransitionRepository transitionRepository{repository};
+    FakeTaskDeletionRepository deletion{repository, dependencyRepository};
+    FakeTaskCategoryRepository categories{{category}};
+    TaskService service{repository, dependencyRepository, creationRepository,
+                        transitionRepository, deletion, categories};
+    QSignalSpy changedSpy{&service, &TaskService::tasksChanged};
+
+    QVERIFY(service.completeTask(primary.id()).ok());
+    QVERIFY(service.redoTask(primary.id()).ok());
+    QVERIFY(service.startTask(primary.id()).ok());
+    QVERIFY(service.completeTask(primary.id()).ok());
+    QVERIFY(service.archiveTask(primary.id()).ok());
+    QVERIFY(service.restoreTask(primary.id()).ok());
+    QVERIFY(service.cancelTask(cancelled.id()).ok());
+
+    QCOMPARE(changedSpy.count(), 7);
+    QCOMPARE(transitionRepository.events().size(), 7);
+    QCOMPARE(std::count_if(transitionRepository.events().cbegin(),
+                           transitionRepository.events().cend(),
+                           [](const auto &event) {
+                               return event.transition == TaskTransition::Complete;
+                           }),
+             2);
+    const auto &first = transitionRepository.events().first();
+    QCOMPARE(first.taskId, primary.id());
+    QCOMPARE(first.fromStatus, TaskStatus::InProgress);
+    QCOMPARE(first.toStatus, TaskStatus::Done);
+    QCOMPARE(first.deadlineSnapshotUtc, std::optional<QDateTime>{deadline});
+    QCOMPARE(first.estimatedMinutesSnapshot, std::optional<int>{45});
+    QCOMPARE(first.prioritySnapshot, TaskPriority::Urgent);
+    QCOMPARE(first.categoryIdSnapshot,
+             std::optional<TaskCategoryId>{category.id});
+    QCOMPARE(first.categoryNameSnapshot,
+             std::optional<QString>{category.name});
+    QCOMPARE(first.categoryColorSnapshot,
+             std::optional<TaskCategoryColor>{category.color});
 }
 
 QTEST_APPLESS_MAIN(TaskServiceTest)

@@ -78,9 +78,29 @@ void SqliteTaskRepository::insertTaskWithPredecessors(
     }
 }
 
-TaskBatchWriteResult SqliteTaskRepository::updateTaskStatesAtomically(
-    const QList<TaskStateChange> &changes)
+TaskTransitionWriteResult SqliteTaskRepository::applyTransitionsAtomically(
+    const QList<TaskTransitionWrite> &writes)
 {
+    for (const TaskTransitionWrite &write : writes) {
+        const TaskStateChange &change = write.stateChange;
+        const TaskActivityEvent &event = write.event;
+        const bool categorized = event.categoryIdSnapshot.has_value()
+            && event.categoryNameSnapshot.has_value()
+            && event.categoryColorSnapshot.has_value();
+        const bool unclassified = !event.categoryIdSnapshot.has_value()
+            && !event.categoryNameSnapshot.has_value()
+            && !event.categoryColorSnapshot.has_value();
+        if (event.eventId.isNull()
+            || event.taskId != change.taskId
+            || event.fromStatus != change.expectedStatus
+            || event.toStatus != change.targetStatus
+            || !event.occurredAtUtc.isValid()
+            || event.occurredAtUtc.toUTC() != change.updatedAtUtc.toUTC()
+            || (!categorized && !unclassified)) {
+            throwPersistenceError(
+                QStringLiteral("Task transition event does not match its state change"));
+        }
+    }
     auto database = QSqlDatabase::database(m_connectionName, false);
     if (!database.transaction()) {
         throwDatabaseError(
@@ -100,7 +120,8 @@ TaskBatchWriteResult SqliteTaskRepository::updateTaskStatesAtomically(
             "WHERE id = :task_id AND status = :expected_status"));
 
         QList<TaskId> conflictingTaskIds;
-        for (const TaskStateChange &change : changes) {
+        for (const TaskTransitionWrite &write : writes) {
+            const TaskStateChange &change = write.stateChange;
             updateQuery.bindValue(QStringLiteral(":target_status"),
                               detail::taskStatusToSqlText(change.targetStatus));
             if (change.statusBeforeArchive.has_value()) {
@@ -136,7 +157,66 @@ TaskBatchWriteResult SqliteTaskRepository::updateTaskStatesAtomically(
                     QStringLiteral("Cannot roll back conflicting batch task transition"),
                     database.lastError());
             }
-            return {0, std::move(conflictingTaskIds)};
+            return {0, 0, std::move(conflictingTaskIds)};
+        }
+
+        QSqlQuery eventQuery(database);
+        eventQuery.prepare(QStringLiteral(
+            "INSERT INTO task_activity_events ("
+            "id, task_id, transition, from_status, to_status, occurred_at_utc_ms, "
+            "deadline_snapshot_utc_ms, estimated_minutes_snapshot, priority_snapshot, "
+            "category_id_snapshot, category_name_snapshot, category_color_snapshot"
+            ") VALUES ("
+            ":id, :task_id, :transition, :from_status, :to_status, :occurred_at_utc_ms, "
+            ":deadline_snapshot_utc_ms, :estimated_minutes_snapshot, :priority_snapshot, "
+            ":category_id_snapshot, :category_name_snapshot, :category_color_snapshot)"));
+        for (const TaskTransitionWrite &write : writes) {
+            const TaskActivityEvent &event = write.event;
+            eventQuery.bindValue(QStringLiteral(":id"),
+                                 event.eventId.toString(QUuid::WithoutBraces));
+            eventQuery.bindValue(QStringLiteral(":task_id"),
+                                 event.taskId.toString(QUuid::WithoutBraces));
+            eventQuery.bindValue(QStringLiteral(":transition"),
+                                 detail::taskTransitionToSqlText(event.transition));
+            eventQuery.bindValue(QStringLiteral(":from_status"),
+                                 detail::taskStatusToSqlText(event.fromStatus));
+            eventQuery.bindValue(QStringLiteral(":to_status"),
+                                 detail::taskStatusToSqlText(event.toStatus));
+            eventQuery.bindValue(QStringLiteral(":occurred_at_utc_ms"),
+                                 event.occurredAtUtc.toUTC().toMSecsSinceEpoch());
+            eventQuery.bindValue(
+                QStringLiteral(":deadline_snapshot_utc_ms"),
+                event.deadlineSnapshotUtc.has_value()
+                    ? QVariant{event.deadlineSnapshotUtc->toUTC().toMSecsSinceEpoch()}
+                    : QVariant{});
+            eventQuery.bindValue(
+                QStringLiteral(":estimated_minutes_snapshot"),
+                event.estimatedMinutesSnapshot.has_value()
+                    ? QVariant{*event.estimatedMinutesSnapshot}
+                    : QVariant{});
+            eventQuery.bindValue(QStringLiteral(":priority_snapshot"),
+                                 detail::taskPriorityToSqlText(event.prioritySnapshot));
+            eventQuery.bindValue(
+                QStringLiteral(":category_id_snapshot"),
+                event.categoryIdSnapshot.has_value()
+                    ? QVariant{event.categoryIdSnapshot->toString(QUuid::WithoutBraces)}
+                    : QVariant{});
+            eventQuery.bindValue(
+                QStringLiteral(":category_name_snapshot"),
+                event.categoryNameSnapshot.has_value()
+                    ? QVariant{*event.categoryNameSnapshot}
+                    : QVariant{});
+            eventQuery.bindValue(
+                QStringLiteral(":category_color_snapshot"),
+                event.categoryColorSnapshot.has_value()
+                    ? QVariant{detail::taskCategoryColorToSqlText(
+                          *event.categoryColorSnapshot)}
+                    : QVariant{});
+            if (!eventQuery.exec()) {
+                throwDatabaseError(QStringLiteral("Cannot insert task activity event"),
+                                   eventQuery.lastError());
+            }
+            eventQuery.finish();
         }
 
         if (!database.commit()) {
@@ -145,7 +225,9 @@ TaskBatchWriteResult SqliteTaskRepository::updateTaskStatesAtomically(
                 database.lastError());
         }
         // 原子提交完成后返回计数；Service 再发送一次 tasksChanged()，避免逐项刷新绑定。
-        return {static_cast<int>(changes.size()), {}};
+        return {static_cast<int>(writes.size()),
+                static_cast<int>(writes.size()),
+                {}};
     } catch (...) {
         database.rollback();
         throw;
@@ -237,4 +319,3 @@ SqliteTaskRepository::deleteArchivedTasksWithDependencies(
 }
 
 } // namespace smartmate::model::persistence
-

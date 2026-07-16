@@ -95,9 +95,9 @@ void SqliteTaskRepository::initializeSchema()
     // user_version是迁移入口；旧程序拒绝更高版本，避免误写新Schema。
     const int schemaVersion = versionQuery.value(0).toInt();
     versionQuery.finish();
-    if (schemaVersion > 3) {
+    if (schemaVersion > 4) {
         throwPersistenceError(
-            QStringLiteral("SQLite schema version %1 is newer than supported version 3")
+            QStringLiteral("SQLite schema version %1 is newer than supported version 4")
                 .arg(schemaVersion));
     }
 
@@ -192,6 +192,55 @@ void SqliteTaskRepository::initializeSchema()
                 "CREATE INDEX IF NOT EXISTS idx_task_dependencies_successor "
                 "ON task_dependencies(successor_id, predecessor_id)"));
 
+        // v4 以不可变事件作为历史统计事实；类别字段是完成时快照，不建立类别外键，
+        // 从而保证类别重命名或删除不会改写过去。任务永久删除则通过 CASCADE 清理历史。
+        executeStatement(
+            database,
+            QStringLiteral(
+                "CREATE TABLE IF NOT EXISTS task_activity_events ("
+                "id TEXT PRIMARY KEY NOT NULL, "
+                "task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, "
+                "transition TEXT NOT NULL CHECK (transition IN ("
+                "'start', 'cancel', 'complete', 'redo', 'archive', 'restore')), "
+                "from_status TEXT NOT NULL CHECK (from_status IN ("
+                "'todo', 'in_progress', 'done', 'cancelled', 'archived')), "
+                "to_status TEXT NOT NULL CHECK (to_status IN ("
+                "'todo', 'in_progress', 'done', 'cancelled', 'archived')), "
+                "occurred_at_utc_ms INTEGER NOT NULL, "
+                "deadline_snapshot_utc_ms INTEGER NULL, "
+                "estimated_minutes_snapshot INTEGER NULL CHECK ("
+                "estimated_minutes_snapshot IS NULL OR "
+                "estimated_minutes_snapshot BETWEEN 1 AND 525600), "
+                "priority_snapshot TEXT NOT NULL CHECK (priority_snapshot IN ("
+                "'low', 'normal', 'high', 'urgent')), "
+                "category_id_snapshot TEXT NULL, "
+                "category_name_snapshot TEXT NULL, "
+                "category_color_snapshot TEXT NULL CHECK ("
+                "category_color_snapshot IS NULL OR category_color_snapshot IN ("
+                "'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'violet', 'slate')), "
+                "CHECK ((category_id_snapshot IS NULL "
+                "        AND category_name_snapshot IS NULL "
+                "        AND category_color_snapshot IS NULL) OR "
+                "       (category_id_snapshot IS NOT NULL "
+                "        AND length(trim(category_name_snapshot)) >= 1 "
+                "        AND category_color_snapshot IS NOT NULL))"
+                ")"));
+        executeStatement(
+            database,
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS idx_task_activity_events_occurred "
+                "ON task_activity_events(occurred_at_utc_ms, id)"));
+        executeStatement(
+            database,
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS idx_task_activity_events_transition_occurred "
+                "ON task_activity_events(transition, occurred_at_utc_ms, id)"));
+        executeStatement(
+            database,
+            QStringLiteral(
+                "CREATE INDEX IF NOT EXISTS idx_task_activity_events_task_occurred "
+                "ON task_activity_events(task_id, occurred_at_utc_ms, id)"));
+
         // SQLite不能用普通约束表达有向无环图；递归CTE从新边的后继出发，
         // 若能到达其前驱，插入该边就会闭合一个环并被中止。
         executeStatement(
@@ -216,8 +265,8 @@ void SqliteTaskRepository::initializeSchema()
                 "  SELECT RAISE(ABORT, 'task dependency would create a cycle'); "
                 "END"));
 
-        if (schemaVersion < 3) {
-            executeStatement(database, QStringLiteral("PRAGMA user_version = 3"));
+        if (schemaVersion < 4) {
+            executeStatement(database, QStringLiteral("PRAGMA user_version = 4"));
         }
 
         if (!database.commit()) {

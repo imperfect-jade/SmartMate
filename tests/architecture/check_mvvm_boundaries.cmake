@@ -53,6 +53,10 @@ scan_includes("${ROOT_DIR}/src/model/planner" "Model planner"
     "qobject" "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
     "viewmodel" "view/")
 
+scan_includes("${ROOT_DIR}/src/model/statistics" "Model statistics"
+    "qobject" "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
+    "viewmodel" "view/")
+
 scan_includes("${ROOT_DIR}/src/model/services" "Model service"
     "qtquick" "qquick" "qtqml" "qqml" "qtsql" "qsql"
     "viewmodel" "view/")

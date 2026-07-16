@@ -78,4 +78,29 @@ TaskCategoryColor taskCategoryColorFromSqlText(const QString &text)
         QStringLiteral("Unknown task category color in SQLite: %1").arg(text));
 }
 
+QString taskTransitionToSqlText(const TaskTransition transition)
+{
+    switch (transition) {
+    case TaskTransition::Start: return QStringLiteral("start");
+    case TaskTransition::Cancel: return QStringLiteral("cancel");
+    case TaskTransition::Complete: return QStringLiteral("complete");
+    case TaskTransition::Redo: return QStringLiteral("redo");
+    case TaskTransition::Archive: return QStringLiteral("archive");
+    case TaskTransition::Restore: return QStringLiteral("restore");
+    }
+    throw RepositoryException(QStringLiteral("Cannot store an unknown task transition"));
+}
+
+TaskTransition taskTransitionFromSqlText(const QString &text)
+{
+    if (text == QStringLiteral("start")) return TaskTransition::Start;
+    if (text == QStringLiteral("cancel")) return TaskTransition::Cancel;
+    if (text == QStringLiteral("complete")) return TaskTransition::Complete;
+    if (text == QStringLiteral("redo")) return TaskTransition::Redo;
+    if (text == QStringLiteral("archive")) return TaskTransition::Archive;
+    if (text == QStringLiteral("restore")) return TaskTransition::Restore;
+    throw RepositoryException(
+        QStringLiteral("Unknown task transition in SQLite: %1").arg(text));
+}
+
 } // namespace smartmate::model::persistence::detail

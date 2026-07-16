@@ -1,5 +1,6 @@
 #include "services/TaskService.h"
 
+#include "domain/TaskActivityEvent.h"
 #include "services/internal/TaskServiceResultSupport.h"
 #include "services/internal/TaskServiceSnapshotSupport.h"
 
@@ -11,6 +12,44 @@
 
 namespace smartmate::model {
 namespace {
+
+TaskActivityEvent makeActivityEvent(
+    const Task &current,
+    const TaskTransition transition,
+    const TaskStatus targetStatus,
+    const QDateTime &occurredAtUtc,
+    const std::optional<TaskCategory> &category)
+{
+    TaskActivityEvent event;
+    event.eventId = QUuid::createUuid();
+    event.taskId = current.id();
+    event.transition = transition;
+    event.fromStatus = current.status();
+    event.toStatus = targetStatus;
+    event.occurredAtUtc = occurredAtUtc.toUTC();
+    event.deadlineSnapshotUtc = current.deadline();
+    event.estimatedMinutesSnapshot = current.estimatedMinutes();
+    event.prioritySnapshot = current.priority();
+    if (category.has_value()) {
+        event.categoryIdSnapshot = category->id;
+        event.categoryNameSnapshot = category->name;
+        event.categoryColorSnapshot = category->color;
+    }
+    return event;
+}
+
+std::optional<TaskCategory> categorySnapshot(
+    const Task &task,
+    const QHash<TaskCategoryId, TaskCategory> &categories)
+{
+    if (!task.categoryId().has_value()) {
+        return std::nullopt;
+    }
+    const auto found = categories.constFind(*task.categoryId());
+    return found == categories.cend()
+        ? std::nullopt
+        : std::optional<TaskCategory>{found.value()};
+}
 
 // 业务层先做快速预检，数据库唯一约束再防御多实例竞争；写失败后重读以恢复准确错误语义。
 [[nodiscard]] TaskResult mapInProgressWriteFailure(
@@ -218,10 +257,16 @@ TaskBatchResult TaskService::applyBatchTransition(
         QList<TaskId> ineligibleTaskIds;
         QList<Task> transitionedTasks;
         transitionedTasks.reserve(normalizedTaskIds.size());
-        QList<TaskStateChange> changes;
-        changes.reserve(normalizedTaskIds.size());
+        QList<TaskTransitionWrite> writes;
+        writes.reserve(normalizedTaskIds.size());
         QSet<TaskId> changedTaskIds;
         const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
+        QHash<TaskCategoryId, TaskCategory> categories;
+        const QList<TaskCategory> categoryRows =
+            m_categoryRepository.findAllCategories();
+        for (const TaskCategory &category : categoryRows) {
+            categories.insert(category.id, category);
+        }
 
         for (const TaskId &taskId : std::as_const(normalizedTaskIds)) {
             const auto taskIndex = taskIndexes.constFind(taskId);
@@ -242,12 +287,26 @@ TaskBatchResult TaskService::applyBatchTransition(
                 : std::nullopt;
             Task transitioned = makeTaskWithStatus(
                 current, *targetStatus, statusBeforeArchive, nowUtc);
-            changes.append({taskId,
-                            // 携带期望旧状态，让 Repository 用条件更新防御预检后的并发变化。
-                            current.status(),
-                            *targetStatus,
-                            statusBeforeArchive,
-                            nowUtc});
+            if (current.categoryId().has_value()
+                && !categories.contains(*current.categoryId())) {
+                return TaskBatchResult::failure(
+                    TaskError::TaskCategoryNotFound,
+                    QStringLiteral("A selected task references a missing category."),
+                    TaskErrorContext{{}, {taskId}, {}});
+            }
+            TaskStateChange stateChange{
+                taskId,
+                // 携带期望旧状态，让 Repository 用条件更新防御预检后的并发变化。
+                current.status(),
+                *targetStatus,
+                statusBeforeArchive,
+                nowUtc};
+            writes.append({std::move(stateChange),
+                           makeActivityEvent(current,
+                                             transition,
+                                             *targetStatus,
+                                             nowUtc,
+                                             categorySnapshot(current, categories))});
             transitionedTasks.append(transitioned);
             tasks[taskIndex.value()] = transitioned;
             changedTaskIds.insert(taskId);
@@ -271,8 +330,8 @@ TaskBatchResult TaskService::applyBatchTransition(
         }
 
         // 所有目标和最终图一次验证完成后，才通过批量端口原子写入整组状态变化。
-        const TaskBatchWriteResult writeResult =
-            m_batchTransitionRepository.updateTaskStatesAtomically(changes);
+        const TaskTransitionWriteResult writeResult =
+            m_transitionRepository.applyTransitionsAtomically(writes);
         if (!writeResult.conflictingTaskIds.isEmpty()) {
             QList<TaskId> conflicts = writeResult.conflictingTaskIds;
             normalizeIds(conflicts);
@@ -281,10 +340,11 @@ TaskBatchResult TaskService::applyBatchTransition(
                 QStringLiteral("Selected task states changed before the batch write."),
                 TaskErrorContext{{}, std::move(conflicts), {}});
         }
-        if (writeResult.updatedTaskCount != changes.size()) {
+        if (writeResult.updatedTaskCount != writes.size()
+            || writeResult.insertedEventCount != writes.size()) {
             return TaskBatchResult::failure(
                 TaskError::PersistenceFailure,
-                QStringLiteral("Batch transition repository did not update every task."));
+                QStringLiteral("Transition repository did not commit every task and event."));
         }
 
         // 整批原子写入成功后统一通知，禁止逐项 emit 导致绑定观察到中间状态。
@@ -334,11 +394,12 @@ TaskResult TaskService::applyTransition(const TaskId &id,
             transition == TaskTransition::Archive
             ? std::optional<TaskStatus>{current->status()}
             : std::nullopt;
+        const QDateTime nowUtc = QDateTime::currentDateTimeUtc();
         Task transitioned = makeTaskWithStatus(
             *current,
             *targetStatus,
             statusBeforeArchive,
-            QDateTime::currentDateTimeUtc());
+            nowUtc);
 
         // Cancel 会让依赖边停止阻塞，只可能修复而不会制造后继冲突；
         // 因此必须绕过受保护后继检查，避免旧的无关异常阻止用户取消任务。
@@ -353,11 +414,43 @@ TaskResult TaskService::applyTransition(const TaskId &id,
             }
         }
 
-        try {
-            if (!m_repository.update(transitioned)) {
+        std::optional<TaskCategory> category;
+        if (current->categoryId().has_value()) {
+            category = m_categoryRepository.findCategoryById(*current->categoryId());
+            if (!category.has_value()) {
                 return TaskResult::failure(
-                    TaskError::NotFound,
-                    QStringLiteral("Task was not found during state transition."));
+                    TaskError::TaskCategoryNotFound,
+                    QStringLiteral("The task category was not found during transition."),
+                    TaskErrorContext{{}, {id}, {}});
+            }
+        }
+
+        try {
+            TaskStateChange stateChange{id,
+                                        current->status(),
+                                        *targetStatus,
+                                        statusBeforeArchive,
+                                        nowUtc};
+            const TaskTransitionWriteResult writeResult =
+                m_transitionRepository.applyTransitionsAtomically({
+                    TaskTransitionWrite{
+                        std::move(stateChange),
+                        makeActivityEvent(*current,
+                                          transition,
+                                          *targetStatus,
+                                          nowUtc,
+                                          category)}});
+            if (!writeResult.conflictingTaskIds.isEmpty()) {
+                return TaskResult::failure(
+                    TaskError::InvalidTaskTransition,
+                    QStringLiteral("The task state changed before the transition write."),
+                    TaskErrorContext{{}, writeResult.conflictingTaskIds, {}});
+            }
+            if (writeResult.updatedTaskCount != 1
+                || writeResult.insertedEventCount != 1) {
+                return TaskResult::failure(
+                    TaskError::PersistenceFailure,
+                    QStringLiteral("Transition repository did not commit task and event."));
             }
         } catch (const RepositoryException &exception) {
             if (*targetStatus == TaskStatus::InProgress) {
@@ -377,4 +470,3 @@ TaskResult TaskService::applyTransition(const TaskId &id,
 }
 
 } // namespace smartmate::model
-

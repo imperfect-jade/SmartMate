@@ -1,11 +1,12 @@
 #pragma once
 
-#include "repositories/ITaskBatchTransitionRepository.h"
+#include "repositories/ITaskActivityRepository.h"
 #include "repositories/ITaskCategoryRepository.h"
 #include "repositories/ITaskCreationRepository.h"
 #include "repositories/ITaskDeletionRepository.h"
 #include "repositories/ITaskDependencyRepository.h"
 #include "repositories/ITaskRepository.h"
+#include "repositories/ITaskTransitionRepository.h"
 
 #include <QString>
 
@@ -19,9 +20,10 @@ namespace smartmate::model::persistence {
 class SqliteTaskRepository final : public ITaskRepository,
                                    public ITaskDependencyRepository,
                                    public ITaskCreationRepository,
-                                   public ITaskBatchTransitionRepository,
+                                   public ITaskTransitionRepository,
                                    public ITaskDeletionRepository,
-                                   public ITaskCategoryRepository {
+                                   public ITaskCategoryRepository,
+                                   public ITaskActivityRepository {
 public:
     /// 打开指定文件或 :memory: 数据库，配置连接并在原子迁移中升级 Schema。
     explicit SqliteTaskRepository(QString databasePath);
@@ -51,8 +53,8 @@ public:
         const Task &task,
         const QList<TaskId> &predecessorIds) override;
     /// 在一个事务内批量更新状态；任一预期状态不匹配时整批回滚。
-    [[nodiscard]] TaskBatchWriteResult updateTaskStatesAtomically(
-        const QList<TaskStateChange> &changes) override;
+    [[nodiscard]] TaskTransitionWriteResult applyTransitionsAtomically(
+        const QList<TaskTransitionWrite> &writes) override;
     /// 在一个事务内永久删除归档任务及其全部入边、出边。
     [[nodiscard]] TaskDeletionWriteResult deleteArchivedTasksWithDependencies(
         const QList<TaskId> &taskIds) override;
@@ -69,6 +71,11 @@ public:
     [[nodiscard]] CategoryDeletionWriteResult deleteCategoryAndUnassignTasks(
         const TaskCategoryId &id,
         const QDateTime &updatedAtUtc) override;
+    [[nodiscard]] QList<TaskActivityEvent> findEventsByOccurredAt(
+        const QDateTime &startInclusiveUtc,
+        const QDateTime &endExclusiveUtc) const override;
+    [[nodiscard]] std::optional<TaskActivityEvent> findLatestCompletionBefore(
+        const QDateTime &endExclusiveUtc) const override;
 
 private:
     /// 启用外键、锁等待和文件数据库 WAL；inMemory 为 true 时不启用 WAL。

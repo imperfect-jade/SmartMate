@@ -7,7 +7,7 @@ namespace smartmate::model {
 TaskService::TaskService(ITaskRepository &repository,
                          ITaskDependencyRepository &dependencyRepository,
                          ITaskCreationRepository &creationRepository,
-                         ITaskBatchTransitionRepository &batchTransitionRepository,
+                         ITaskTransitionRepository &transitionRepository,
                          ITaskDeletionRepository &deletionRepository,
                          ITaskCategoryRepository &categoryRepository,
                          QObject *parent)
@@ -15,7 +15,7 @@ TaskService::TaskService(ITaskRepository &repository,
     , m_repository(repository)
     , m_dependencyRepository(dependencyRepository)
     , m_creationRepository(creationRepository)
-    , m_batchTransitionRepository(batchTransitionRepository)
+    , m_transitionRepository(transitionRepository)
     , m_deletionRepository(deletionRepository)
     , m_categoryRepository(categoryRepository)
 {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/TaskCategory.h"
+#include "domain/TaskStateMachine.h"
 #include "domain/TaskTypes.h"
 
 #include <QString>
@@ -21,5 +22,10 @@ namespace smartmate::model::persistence::detail {
 [[nodiscard]] QString taskCategoryColorToSqlText(TaskCategoryColor color);
 /// 从 SQLite 稳定文本恢复类别颜色；未知文本抛出 RepositoryException。
 [[nodiscard]] TaskCategoryColor taskCategoryColorFromSqlText(const QString &text);
+
+/// 将任务转换类型映射为事件表稳定文本。
+[[nodiscard]] QString taskTransitionToSqlText(TaskTransition transition);
+/// 从事件表稳定文本恢复任务转换类型。
+[[nodiscard]] TaskTransition taskTransitionFromSqlText(const QString &text);
 
 } // namespace smartmate::model::persistence::detail

@@ -2,7 +2,7 @@
 
 #include "domain/TaskCreationRequest.h"
 #include "domain/TaskStateMachine.h"
-#include "repositories/ITaskBatchTransitionRepository.h"
+#include "repositories/ITaskTransitionRepository.h"
 #include "repositories/ITaskCreationRepository.h"
 #include "repositories/ITaskCategoryRepository.h"
 #include "repositories/ITaskDeletionRepository.h"
@@ -28,7 +28,7 @@ public:
     TaskService(ITaskRepository &repository,
                 ITaskDependencyRepository &dependencyRepository,
                 ITaskCreationRepository &creationRepository,
-                ITaskBatchTransitionRepository &batchTransitionRepository,
+                ITaskTransitionRepository &transitionRepository,
                 ITaskDeletionRepository &deletionRepository,
                 ITaskCategoryRepository &categoryRepository,
                 QObject *parent = nullptr);
@@ -111,8 +111,8 @@ private:
     ITaskDependencyRepository &m_dependencyRepository;
     /// 独立命令端口保证跨 tasks 与 task_dependencies 的写入具有事务边界。
     ITaskCreationRepository &m_creationRepository;
-    /// 批量状态端口以条件更新防御 Service 预检后的并发变化，并保证整批原子发布。
-    ITaskBatchTransitionRepository &m_batchTransitionRepository;
+    /// 转换端口以条件更新防御 Service 预检后的并发变化，并原子提交状态与事件。
+    ITaskTransitionRepository &m_transitionRepository;
     /// 永久删除端口保证任务与全部入边、出边在同一事务内移除。
     ITaskDeletionRepository &m_deletionRepository;
     /// 仅用于验证任务草稿中的稳定类别 ID 和分类图查询，不承担类别生命周期命令。

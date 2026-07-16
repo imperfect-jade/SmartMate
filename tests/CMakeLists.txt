@@ -104,6 +104,16 @@ target_link_libraries(tst_task_ordering
 
 add_test(NAME model.task_ordering COMMAND tst_task_ordering)
 
+qt_add_executable(tst_statistics_service
+    model/tst_StatisticsService.cpp
+    fakes/FakeTaskActivityRepository.h
+    fakes/FakeTaskRepository.h
+    fakes/FakeTaskDependencyRepository.h
+)
+target_include_directories(tst_statistics_service PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tst_statistics_service PRIVATE smartmate_model Qt6::Test)
+add_test(NAME model.statistics_service COMMAND tst_statistics_service)
+
 qt_add_executable(tst_sqlite_task_repository
     persistence/tst_SqliteTaskRepository.cpp
 )
@@ -296,6 +306,7 @@ set(runtime_tests
     model.task_dependency_cancellation
     model.task_state_transitions
     model.task_ordering
+    model.statistics_service
     persistence.sqlite_task_repository
     persistence.appearance_settings
     viewmodel.task_viewmodels
