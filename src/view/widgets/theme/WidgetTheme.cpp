@@ -112,7 +112,10 @@ QPalette WidgetTheme::palette() const
 QString WidgetTheme::styleSheet() const
 {
     return QStringLiteral(R"(
-        QMainWindow, QWidget#pageSurface { background: %1; color: %2; }
+        QMainWindow, QWidget#pageSurface, QScrollArea#statisticsPage,
+        QWidget#statisticsViewport, QWidget#statisticsContent {
+            background: %1; color: %2;
+        }
         QFrame#navigationPanel { background: %3; border-right: 1px solid %4; }
         QFrame#settingsCard, QFrame#previewCard {
             background: %5; border: 1px solid %4; border-radius: 10px;

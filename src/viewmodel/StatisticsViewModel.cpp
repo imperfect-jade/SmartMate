@@ -141,33 +141,33 @@ QList<StatisticsHealthRow> makeHealthRows(const model::StatisticsSnapshot &snaps
          QStringLiteral("可执行"),
          snapshot.health.executableCount,
          maximum,
-         QStringLiteral("当前可以开始的待办任务"),
+         QStringLiteral("现在可以开始的待办任务"),
          StatisticsContract::Positive,
-         QStringLiteral("可执行 %1 项。当前可以开始的待办任务。")
+         QStringLiteral("可执行 %1 项。现在可以开始的待办任务。")
              .arg(snapshot.health.executableCount)},
         {StatisticsHealthContract::Blocked,
          QStringLiteral("被阻塞"),
          snapshot.health.blockedCount,
          maximum,
-         QStringLiteral("前置任务尚未解析"),
+         QStringLiteral("仍需等待前置任务完成或取消"),
          StatisticsContract::Risk,
-         QStringLiteral("被阻塞 %1 项。前置任务尚未解析。")
+         QStringLiteral("被阻塞 %1 项。仍需等待前置任务完成或取消。")
              .arg(snapshot.health.blockedCount)},
         {StatisticsHealthContract::DueSoon,
          QStringLiteral("即将到期"),
          snapshot.health.dueSoonCount,
          maximum,
-         QStringLiteral("三个本地自然日内到期"),
+         QStringLiteral("将在今天至后天内到期"),
          StatisticsContract::Risk,
-         QStringLiteral("即将到期 %1 项。三个本地自然日内到期。")
+         QStringLiteral("即将到期 %1 项。将在今天至后天内到期。")
              .arg(snapshot.health.dueSoonCount)},
         {StatisticsHealthContract::Overdue,
          QStringLiteral("已经逾期"),
          snapshot.health.overdueCount,
          maximum,
-         QStringLiteral("截止时间已经超过"),
+         QStringLiteral("已超过截止时间"),
          StatisticsContract::Risk,
-         QStringLiteral("已经逾期 %1 项。截止时间已经超过。")
+         QStringLiteral("已经逾期 %1 项。已超过截止时间。")
              .arg(snapshot.health.overdueCount)},
     };
 }

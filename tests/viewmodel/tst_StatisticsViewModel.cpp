@@ -203,6 +203,26 @@ void StatisticsViewModelTest::projectsCardsAndStableChildModels()
                  .data(viewmodel::StatisticsHealthContract::ValueRole)
                  .toInt(),
              1);
+    const QList<QString> descriptions{
+        QStringLiteral("现在可以开始的待办任务"),
+        QStringLiteral("仍需等待前置任务完成或取消"),
+        QStringLiteral("将在今天至后天内到期"),
+        QStringLiteral("已超过截止时间"),
+    };
+    const QList<QString> accessibleTexts{
+        QStringLiteral("可执行 4 项。现在可以开始的待办任务。"),
+        QStringLiteral("被阻塞 1 项。仍需等待前置任务完成或取消。"),
+        QStringLiteral("即将到期 1 项。将在今天至后天内到期。"),
+        QStringLiteral("已经逾期 1 项。已超过截止时间。"),
+    };
+    for (int row = 0; row < health->rowCount(); ++row) {
+        const QModelIndex index = health->index(row, 0);
+        QCOMPARE(index.data(viewmodel::StatisticsHealthContract::MaximumRole).toInt(), 5);
+        QCOMPARE(index.data(viewmodel::StatisticsHealthContract::DescriptionRole).toString(),
+                 descriptions.at(row));
+        QCOMPARE(index.data(viewmodel::StatisticsHealthContract::AccessibleTextRole).toString(),
+                 accessibleTexts.at(row));
+    }
 }
 
 void StatisticsViewModelTest::switchesRangesWithoutRedundantNotifications()

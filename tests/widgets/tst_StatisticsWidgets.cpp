@@ -3,10 +3,12 @@
 #include "viewmodel/contracts/StatisticsContract.h"
 
 #include <QAbstractBarSeries>
+#include <QBarCategoryAxis>
 #include <QBarSeries>
 #include <QBarSet>
 #include <QChart>
 #include <QChartView>
+#include <QDate>
 #include <QFrame>
 #include <QHorizontalBarSeries>
 #include <QLabel>
@@ -21,6 +23,32 @@
 using namespace smartmate;
 
 namespace {
+
+QList<QHash<int, QVariant>> makeTrendRows(const int count, const bool weekly = false)
+{
+    QList<QHash<int, QVariant>> rows;
+    const QDate start{2026, 7, 10};
+    rows.reserve(count);
+    for (int row = 0; row < count; ++row) {
+        const QDate bucketDate = start.addDays(weekly ? row * 7 : row);
+        const int value = count == 30 && row >= 27 ? row - 26 : row % 3;
+        const QString label = QStringLiteral("%1/%2")
+                                  .arg(bucketDate.month())
+                                  .arg(bucketDate.day());
+        rows.append({
+            {viewmodel::StatisticsTrendContract::LabelRole, label},
+            {viewmodel::StatisticsTrendContract::ValueRole, value},
+            {viewmodel::StatisticsTrendContract::TooltipRole,
+             QStringLiteral("%1月%2日：完成 %3 次")
+                 .arg(bucketDate.month()).arg(bucketDate.day()).arg(value)},
+            {viewmodel::StatisticsTrendContract::CurrentRole, row == count - 1},
+            {viewmodel::StatisticsTrendContract::AccessibleTextRole,
+             QStringLiteral("%1月%2日完成 %3 次")
+                 .arg(bucketDate.month()).arg(bucketDate.day()).arg(value)},
+        });
+    }
+    return rows;
+}
 
 class MutableRows final : public QAbstractListModel {
 public:
@@ -56,18 +84,7 @@ public:
         , categoryRows(this)
         , healthRows(this)
     {
-        for (int row = 0; row < 7; ++row) {
-            trendRows.rows.append({
-                {viewmodel::StatisticsTrendContract::LabelRole,
-                 QStringLiteral("7/%1").arg(10 + row)},
-                {viewmodel::StatisticsTrendContract::ValueRole, row % 3},
-                {viewmodel::StatisticsTrendContract::TooltipRole,
-                 QStringLiteral("7月%1日：完成 %2 次").arg(10 + row).arg(row % 3)},
-                {viewmodel::StatisticsTrendContract::CurrentRole, row == 6},
-                {viewmodel::StatisticsTrendContract::AccessibleTextRole,
-                 QStringLiteral("7月%1日完成 %2 次").arg(10 + row).arg(row % 3)},
-            });
-        }
+        trendRows.rows = makeTrendRows(7);
         categoryRows.rows = {
             {{viewmodel::StatisticsCategoryContract::LabelRole, QStringLiteral("学习")},
              {viewmodel::StatisticsCategoryContract::ValueRole, 4},
@@ -174,6 +191,15 @@ QBarSeries *trendSeries(view::widgets::StatisticsPage &page)
     return nullptr;
 }
 
+QBarCategoryAxis *trendAxis(view::widgets::StatisticsPage &page)
+{
+    QChartView *view = required<QChartView>(page, "trendChartView");
+    for (QAbstractAxis *axis : view->chart()->axes(Qt::Horizontal)) {
+        if (auto *categories = qobject_cast<QBarCategoryAxis *>(axis)) return categories;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 class StatisticsWidgetsTest final : public QObject {
@@ -202,6 +228,8 @@ void StatisticsWidgetsTest::initialProjectionBuildsCardsChartsAndAccessibility()
     QCOMPARE(set->count(), 7);
     QCOMPARE(set->at(2), 2.0);
     QVERIFY(set->isBarSelected(6));
+    QVERIFY(trendAxis(page) != nullptr);
+    QCOMPARE(trendAxis(page)->count(), 7);
 
     QChartView *categoryView = required<QChartView>(page, "categoryChartView");
     QCOMPARE(categoryView->chart()->series().size(), 2);
@@ -219,6 +247,10 @@ void StatisticsWidgetsTest::initialProjectionBuildsCardsChartsAndAccessibility()
 
     QCOMPARE(required<QProgressBar>(page, "healthProgress_0")->value(), 1);
     QCOMPARE(required<QProgressBar>(page, "healthProgress_3")->value(), 4);
+    QCOMPARE(required<QLabel>(page, "healthAccessibleSummary")->text(),
+             QStringLiteral("当前有 8 项活动任务。执行状态：1 项可执行，2 项被阻塞。"
+                            "风险提醒：3 项即将到期，4 项已经逾期；"
+                            "风险项可能与执行状态重叠。"));
     QVERIFY(!required<QFrame>(page, "todayStatisticsCard")
                  ->accessibleDescription().isEmpty());
     QVERIFY(!required<QChartView>(page, "trendChartView")
@@ -239,10 +271,29 @@ void StatisticsWidgetsTest::commandsAndModelNotificationsRefreshWithoutDuplicati
     FakeStatistics statistics;
     view::widgets::StatisticsPage page{statistics};
 
+    statistics.trendRows.replace(makeTrendRows(30));
     QTest::mouseClick(required<QPushButton>(page, "last30DaysButton"), Qt::LeftButton);
     QCOMPARE(statistics.rangeCalls, 1);
     QCOMPARE(statistics.lastRequestedRange, viewmodel::StatisticsContract::Last30Days);
     QVERIFY(required<QPushButton>(page, "last30DaysButton")->isChecked());
+    QTRY_COMPARE(trendSeries(page)->barSets().constFirst()->count(), 30);
+    QBarSeries *thirtyDaySeries = trendSeries(page);
+    QVERIFY(thirtyDaySeries != nullptr);
+    QBarSet *thirtyDaySet = thirtyDaySeries->barSets().constFirst();
+    QCOMPARE(thirtyDaySet->count(), 30);
+    QCOMPARE(thirtyDaySet->at(27), 1.0);
+    QCOMPARE(thirtyDaySet->at(28), 2.0);
+    QCOMPARE(thirtyDaySet->at(29), 3.0);
+    QVERIFY(thirtyDaySet->isBarSelected(29));
+    QBarCategoryAxis *thirtyDayAxis = trendAxis(page);
+    QVERIFY(thirtyDayAxis != nullptr);
+    QCOMPARE(thirtyDayAxis->count(), 30);
+    int visibleLabelCount = 0;
+    for (QString label : thirtyDayAxis->categories()) {
+        label.remove(QChar{0x200B});
+        if (!label.isEmpty()) ++visibleLabelCount;
+    }
+    QCOMPARE(visibleLabelCount, 7);
 
     statistics.rejectRange = true;
     QTest::mouseClick(required<QPushButton>(page, "last12WeeksButton"), Qt::LeftButton);
@@ -262,12 +313,13 @@ void StatisticsWidgetsTest::commandsAndModelNotificationsRefreshWithoutDuplicati
     QBarSeries *trend = trendSeries(page);
     QVERIFY(trend != nullptr);
     QCOMPARE(trend->barSets().constFirst()->at(0), 9.0);
-    QCOMPARE(trend->barSets().constFirst()->count(), 7);
+    QCOMPARE(trend->barSets().constFirst()->count(), 30);
+    QCOMPARE(trendAxis(page)->count(), 30);
 
     statistics.announceStatistics();
     QTRY_COMPARE(required<QChartView>(page, "trendChartView")
                      ->chart()->series().size(), 1);
-    QCOMPARE(trendSeries(page)->barSets().constFirst()->count(), 7);
+    QCOMPARE(trendSeries(page)->barSets().constFirst()->count(), 30);
 
     page.show();
     QCoreApplication::processEvents();
@@ -275,6 +327,16 @@ void StatisticsWidgetsTest::commandsAndModelNotificationsRefreshWithoutDuplicati
     page.show();
     QCoreApplication::processEvents();
     QCOMPARE(statistics.reloadCalls, 2);
+
+    statistics.rejectRange = false;
+    statistics.trendRows.replace(makeTrendRows(12, true));
+    QTest::mouseClick(required<QPushButton>(page, "last12WeeksButton"), Qt::LeftButton);
+    QTRY_COMPARE(trendSeries(page)->barSets().constFirst()->count(), 12);
+    QCOMPARE(trendAxis(page)->count(), 12);
+    QVERIFY(trendSeries(page)->barSets().constFirst()->isBarSelected(11));
+    for (const QString &label : trendAxis(page)->categories()) {
+        QVERIFY(!label.contains(QChar{0x200B}));
+    }
 }
 
 void StatisticsWidgetsTest::emptyStatesThemeAndResponsiveLayoutRemainUsable()
@@ -305,6 +367,16 @@ void StatisticsWidgetsTest::emptyStatesThemeAndResponsiveLayoutRemainUsable()
     const auto blueTheme = view::widgets::WidgetTheme::fromAccentIndex(1);
     page.setPalette(blueTheme.palette());
     QCoreApplication::processEvents();
+    QWidget *content = required<QWidget>(page, "statisticsContent");
+    QCOMPARE(page.viewport()->objectName(), QStringLiteral("statisticsViewport"));
+    QCOMPARE(page.viewport()->backgroundRole(), QPalette::Window);
+    QCOMPARE(content->backgroundRole(), QPalette::Window);
+    QVERIFY(page.viewport()->autoFillBackground());
+    QVERIFY(content->autoFillBackground());
+    QCOMPARE(page.viewport()->palette().color(page.viewport()->backgroundRole()),
+             blueTheme.background);
+    QCOMPARE(content->palette().color(content->backgroundRole()),
+             blueTheme.background);
     QTRY_COMPARE(trendSeries(page)->barSets().constFirst()->color(),
                  blueTheme.primarySoft);
 

@@ -124,6 +124,7 @@ private slots:
     void themeAndUiNotificationArePresentedByMainWindow();
     void previewRemainsReadableAtNarrowWidthAndLargeFont();
     void fontScaleOptionsApplyDistinctNonAccumulatingSizes();
+    void accentSwitchPreservesAppliedChildFont();
 };
 
 void SettingsWidgetsTest::initialStateAndNavigationAreSynchronized()
@@ -272,6 +273,34 @@ void SettingsWidgetsTest::fontScaleOptionsApplyDistinctNonAccumulatingSizes()
     settings.replaceProjection(0, 0, 1);
     QCOMPARE(window.font().pointSizeF(), baseline * 1.10);
     QCOMPARE(settings.scaleSetCount, 0);
+}
+
+void SettingsWidgetsTest::accentSwitchPreservesAppliedChildFont()
+{
+    FakeAppearanceSettingsContract settings;
+    settings.familyIndex = 2;
+    settings.scaleIndex = 2;
+    MainWindow window{settings};
+    window.show();
+
+    QTest::mouseClick(requiredChild<QPushButton>(window, "settingsNavigationButton"),
+                      Qt::LeftButton);
+    auto *largeScale = requiredChild<QPushButton>(window, "fontScaleButton_2");
+    auto *reset = requiredChild<QPushButton>(window, "resetAppearanceButton");
+    auto *blueAccent = requiredChild<QPushButton>(window, "accentThemeButton_1");
+    QVERIFY(largeScale->isChecked());
+
+    QTest::mouseClick(blueAccent, Qt::LeftButton);
+    QCOMPARE(settings.accentIndex, 1);
+    QCOMPARE(settings.familyIndex, 2);
+    QCOMPARE(settings.scaleIndex, 2);
+    QVERIFY(largeScale->isChecked());
+
+    const QFont expected = smartmate::view::widgets::appearanceFont(
+        QApplication::font(), settings);
+    QCOMPARE(window.font(), expected);
+    QCOMPARE(reset->font().family(), expected.family());
+    QCOMPARE(reset->font().pointSizeF(), expected.pointSizeF());
 }
 
 QTEST_MAIN(SettingsWidgetsTest)

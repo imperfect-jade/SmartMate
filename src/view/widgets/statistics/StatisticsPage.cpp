@@ -211,7 +211,14 @@ StatisticsPage::StatisticsPage(viewmodel::StatisticsContract &statistics,
     setWidgetResizable(true);
     setFrameShape(QFrame::NoFrame);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // QScrollArea 的 viewport 默认使用 Base role，主题切换时会露出普通表面色。
+    // 页面空白区与内容区统一使用 Window role，卡片仍由 WidgetTheme 使用 surface。
+    viewport()->setObjectName(QStringLiteral("statisticsViewport"));
+    viewport()->setBackgroundRole(QPalette::Window);
+    viewport()->setAutoFillBackground(true);
     m_content->setObjectName(QStringLiteral("statisticsContent"));
+    m_content->setBackgroundRole(QPalette::Window);
+    m_content->setAutoFillBackground(true);
     setWidget(m_content);
 
     auto *root = new QVBoxLayout(m_content);
@@ -513,7 +520,9 @@ void StatisticsPage::refreshTrend()
         if (m_statistics.range() == StatisticsContract::Last30Days
             && row != 0 && row != model->rowCount() - 1 && !current
             && row % 5 != 0) {
-            label.clear();
+            // QBarCategoryAxis 会忽略重复类别；用不同长度的零宽字符保留
+            // 30 个轴槽位，同时让非关键日期在视觉上保持为空。
+            label = QString(row + 1, QChar{0x200B});
         }
         axisLabels.append(label);
         m_trendTooltips.append(index.data(TrendContract::TooltipRole).toString());
@@ -636,6 +645,10 @@ void StatisticsPage::refreshHealth()
     clearLayout(*m_healthRows);
     QAbstractItemModel *model = m_statistics.health();
     const WidgetTheme theme = WidgetTheme::fromPalette(palette());
+    int executableCount = 0;
+    int blockedCount = 0;
+    int dueSoonCount = 0;
+    int overdueCount = 0;
     for (int row = 0; row < model->rowCount(); ++row) {
         const QModelIndex index = model->index(row, 0);
         const int type = index.data(HealthContract::TypeRole).toInt();
@@ -645,6 +658,21 @@ void StatisticsPage::refreshHealth()
         const QString description = index.data(HealthContract::DescriptionRole).toString();
         const QString accessible = index.data(HealthContract::AccessibleTextRole).toString();
         const auto semantic = tone(index.data(HealthContract::SemanticRole));
+
+        switch (static_cast<HealthContract::Type>(type)) {
+        case HealthContract::Executable:
+            executableCount = value;
+            break;
+        case HealthContract::Blocked:
+            blockedCount = value;
+            break;
+        case HealthContract::DueSoon:
+            dueSoonCount = value;
+            break;
+        case HealthContract::Overdue:
+            overdueCount = value;
+            break;
+        }
 
         auto *container = new QWidget(m_healthCard);
         container->setObjectName(QStringLiteral("healthRow_%1").arg(type));
@@ -680,9 +708,14 @@ void StatisticsPage::refreshHealth()
         layout->addWidget(detail, 2, 0, 1, 2);
         m_healthRows->addWidget(container);
     }
-    const QString summary = tr("当前活动任务 %1 项。%2")
+    const QString summary = tr(
+        "当前有 %1 项活动任务。执行状态：%2 项可执行，%3 项被阻塞。"
+        "风险提醒：%4 项即将到期，%5 项已经逾期；风险项可能与执行状态重叠。")
         .arg(m_statistics.activeTaskCount())
-        .arg(joinedAccessibleRows(*model, HealthContract::AccessibleTextRole));
+        .arg(executableCount)
+        .arg(blockedCount)
+        .arg(dueSoonCount)
+        .arg(overdueCount);
     m_healthSummary->setText(summary);
     m_healthSummary->setAccessibleName(tr("任务健康文字摘要"));
     m_healthSummary->setAccessibleDescription(summary);

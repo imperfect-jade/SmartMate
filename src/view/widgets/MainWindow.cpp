@@ -52,6 +52,19 @@ QPushButton *navigationButton(const QString &text,
     return button;
 }
 
+QString themedStyleSheet(const WidgetTheme &theme, const QFont &font)
+{
+    // QWidget 样式表会形成字体传播边界；把基础字体写入同一份 QSS，确保未单独
+    // 指定标题字号的子控件与 Contract 当前字体档位保持一致。
+    QString family = font.family();
+    family.replace(u'\\', QStringLiteral("\\\\"));
+    family.replace(u'"', QStringLiteral("\\\""));
+    return QStringLiteral("QWidget { font-family: \"%1\"; font-size: %2pt; }\n%3")
+        .arg(family,
+             QString::number(font.pointSizeF(), 'f', 2),
+             theme.styleSheet());
+}
+
 } // namespace
 
 MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
@@ -217,12 +230,16 @@ void MainWindow::applyAppearance()
     const auto &settings = m_appearanceSettings;
     const WidgetTheme theme = WidgetTheme::fromAccentIndex(
         settings.accentThemeIndex());
-    // 旧 QSS 可能继续覆盖 Base 等 Palette role；先解除旧样式，再注入完整新主题，
-    // 让自绘卡片与普通控件在强调色切换后读取同一套颜色。
+    const QFont targetFont = appearanceFont(m_baselineFont, settings);
+    // 旧 QSS 可能继续覆盖 Base 等 Palette role；先完整安装新主题，再传播字体，
+    // 让自绘卡片与普通控件读取同一套颜色。解除和安装 QSS 都可能重置子控件的
+    // 继承字体，因此最后先传播基准字体，再传播目标字体；即使字号档位未变，
+    // 也不能因 QMainWindow 的 QFont 幂等优化而让子控件停留在默认字号。
     setStyleSheet({});
     setPalette(theme.palette());
-    setFont(appearanceFont(m_baselineFont, settings));
-    setStyleSheet(theme.styleSheet());
+    setStyleSheet(themedStyleSheet(theme, targetFont));
+    setFont(m_baselineFont);
+    setFont(targetFont);
 }
 
 void MainWindow::showNotification(const common::UiNotification &notification)

@@ -30,7 +30,12 @@ void AppearanceSettingsTest::loadsAndPersistsValidatedSelections()
     QCOMPARE(viewModel.fontScale(), 1.25);
     QSignalSpy changed{&viewModel, &AppearanceSettingsViewModel::appearanceChanged};
     viewModel.setAccentThemeIndex(0);
-    QCOMPARE(repository.settings.accentTheme, AccentTheme::Green);
+    const AppearanceSettings expected{AccentTheme::Green,
+                                      UiFontFamily::MicrosoftYaHeiUI,
+                                      UiFontScale::Large};
+    QCOMPARE(repository.settings, expected);
+    QCOMPARE(viewModel.fontFamilyIndex(), 1);
+    QCOMPARE(viewModel.fontScaleIndex(), 2);
     QCOMPARE(repository.saveCount, 1);
     QCOMPARE(changed.count(), 1);
 }
