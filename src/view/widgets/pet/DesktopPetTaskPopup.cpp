@@ -171,9 +171,9 @@ void DesktopPetTaskPopup::refresh()
         m_stateLabel->setText(tr("正在进行"));
         m_titleLabel->setText(m_focus.focusTitle());
         m_detailLabel->setText(
-            tr("%1 · 预计 %2 分钟")
-                .arg(m_focus.focusStatusText())
-                .arg(m_focus.focusEstimatedMinutes()));
+            tr("%1 · %2")
+                .arg(m_focus.focusStatusText(),
+                     m_focus.focusEstimatedText()));
         break;
     case State::NoTasks:
         m_stateLabel->setText(tr("今天很轻松"));

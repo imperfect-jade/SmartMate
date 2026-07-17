@@ -104,7 +104,8 @@ FakeTaskCategoryRepository categoryRepository;
                         QString description = QStringLiteral("description"),
                         std::optional<QDateTime> deadline = std::nullopt,
                         std::optional<smartmate::model::TaskCategoryId> categoryId =
-                            std::nullopt)
+                            std::nullopt,
+                        std::optional<int> estimatedMinutes = 30)
 {
     return Task{QUuid::fromString(id),
                 std::move(title),
@@ -115,7 +116,7 @@ FakeTaskCategoryRepository categoryRepository;
                     ? std::optional<TaskStatus>{TaskStatus::Todo}
                     : std::nullopt,
                 std::move(deadline),
-                30,
+                estimatedMinutes,
                 utcTime(1700000000000),
                 utcTime(updatedMilliseconds),
                 categoryId};

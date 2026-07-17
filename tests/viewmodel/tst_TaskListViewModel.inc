@@ -859,7 +859,8 @@ void TaskViewModelsTest::listFocusProjectionIgnoresFiltersAndTracksInProgress()
     const Task urgent = task(
         QStringLiteral("{11111111-1111-1111-1111-111111111111}"),
         QStringLiteral("现在最值得做"), TaskStatus::Todo, 1700000001000,
-        TaskPriority::Urgent);
+        TaskPriority::Urgent, QStringLiteral("description"),
+        std::nullopt, std::nullopt, std::nullopt);
     const Task normal = task(
         QStringLiteral("{22222222-2222-2222-2222-222222222222}"),
         QStringLiteral("普通任务"), TaskStatus::Todo, 1700000002000);
@@ -872,9 +873,13 @@ void TaskViewModelsTest::listFocusProjectionIgnoresFiltersAndTracksInProgress()
     ProjectionSources sources{service};
     TaskListViewModel viewModel{service, sources.plan, sources.categories};
     TaskFocusViewModel focusViewModel{sources.plan, sources.categories};
+    QSignalSpy focusChangedSpy{&focusViewModel,
+                               &TaskFocusViewModel::focusTaskChanged};
 
     QCOMPARE(focusViewModel.focusState(), TaskFocusViewModel::FocusState::Suggested);
     QCOMPARE(focusViewModel.focusTaskId(), urgent.id().toString(QUuid::WithoutBraces));
+    QCOMPARE(focusViewModel.focusEstimatedMinutes(), 0);
+    QCOMPARE(focusViewModel.focusEstimatedText(), QStringLiteral("未设置预计用时"));
     QVERIFY(focusViewModel.focusCanStart());
 
     viewModel.setSearchText(QStringLiteral("普通"));
@@ -882,13 +887,23 @@ void TaskViewModelsTest::listFocusProjectionIgnoresFiltersAndTracksInProgress()
     QCOMPARE(focusViewModel.focusTaskId(), urgent.id().toString(QUuid::WithoutBraces));
 
     QVERIFY(viewModel.startTask(urgent.id().toString(QUuid::WithoutBraces)));
+    QVERIFY(focusChangedSpy.count() > 0);
     QCOMPARE(focusViewModel.focusState(), TaskFocusViewModel::FocusState::InProgress);
     QCOMPARE(focusViewModel.focusTaskId(), urgent.id().toString(QUuid::WithoutBraces));
+    QCOMPARE(focusViewModel.focusEstimatedText(), QStringLiteral("未设置预计用时"));
     QVERIFY(focusViewModel.focusCanComplete());
     const int normalRow = rowForId(viewModel, normal.id().toString(QUuid::WithoutBraces));
     QVERIFY(normalRow >= 0);
     QVERIFY(!viewModel.data(viewModel.index(normalRow),
                             TaskListViewModel::CanStartRole).toBool());
+
+    focusChangedSpy.clear();
+    QVERIFY(viewModel.completeTask(urgent.id().toString(QUuid::WithoutBraces)));
+    QVERIFY(focusChangedSpy.count() > 0);
+    QCOMPARE(focusViewModel.focusState(), TaskFocusViewModel::FocusState::Suggested);
+    QCOMPARE(focusViewModel.focusTaskId(), normal.id().toString(QUuid::WithoutBraces));
+    QCOMPARE(focusViewModel.focusEstimatedMinutes(), 30);
+    QCOMPARE(focusViewModel.focusEstimatedText(), QStringLiteral("预计 30 分钟"));
 }
 
 

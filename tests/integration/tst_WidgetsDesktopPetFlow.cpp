@@ -31,7 +31,8 @@ public:
     QString focusStatusText() const override { return QStringLiteral("进行中"); }
     QString focusPriorityText() const override { return QStringLiteral("普通"); }
     QString focusDeadlineText() const override { return QStringLiteral("无截止时间"); }
-    int focusEstimatedMinutes() const noexcept override { return 25; }
+    int focusEstimatedMinutes() const noexcept override { return estimatedMinutes; }
+    QString focusEstimatedText() const override { return estimatedText; }
     QString focusReasonText() const override { return QStringLiteral("当前最推荐"); }
     bool focusOverdue() const noexcept override { return false; }
     bool focusCanStart() const noexcept override { return canStart; }
@@ -51,6 +52,8 @@ public:
     FocusState state{FocusState::NoTasks};
     QString taskId{QStringLiteral("stable-task-id")};
     QString title{QStringLiteral("测试任务")};
+    int estimatedMinutes{25};
+    QString estimatedText{QStringLiteral("预计 25 分钟")};
     bool canStart{false};
     bool canComplete{false};
 };
@@ -144,10 +147,13 @@ void WidgetsDesktopPetFlowTest::popupRendersEveryFocusState()
     view::widgets::pet::DesktopPetTaskPopup popup{focus, *app.taskList()};
     auto *title = popup.findChild<QLabel *>(
         QStringLiteral("desktopPetPopupTitle"));
+    auto *detail = popup.findChild<QLabel *>(
+        QStringLiteral("desktopPetPopupDetail"));
     auto *start = popup.findChild<QPushButton *>(
         QStringLiteral("desktopPetStartButton"));
     auto *complete = popup.findChild<QPushButton *>(
         QStringLiteral("desktopPetCompleteButton"));
+    QVERIFY(title && detail && start && complete);
 
     QCOMPARE(title->text(), QStringLiteral("暂时没有待处理任务"));
     QVERIFY(start->isHidden());
@@ -171,9 +177,15 @@ void WidgetsDesktopPetFlowTest::popupRendersEveryFocusState()
     QVERIFY(!error->text().isEmpty());
 
     focus.replace(viewmodel::TaskFocusContract::FocusState::InProgress);
+    QCOMPARE(detail->text(), QStringLiteral("进行中 · 预计 25 分钟"));
     QVERIFY(start->isHidden());
     QVERIFY(!complete->isHidden());
     QVERIFY(complete->isEnabled());
+
+    focus.estimatedMinutes = 0;
+    focus.estimatedText = QStringLiteral("未设置预计用时");
+    emit focus.focusTaskChanged();
+    QCOMPARE(detail->text(), QStringLiteral("进行中 · 未设置预计用时"));
 }
 
 void WidgetsDesktopPetFlowTest::mainWindowStateSelectsExactlyOnePetView()

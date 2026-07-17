@@ -21,6 +21,7 @@ class TaskFocusContract : public QObject {
     Q_PROPERTY(QString focusPriorityText READ focusPriorityText NOTIFY focusTaskChanged)
     Q_PROPERTY(QString focusDeadlineText READ focusDeadlineText NOTIFY focusTaskChanged)
     Q_PROPERTY(int focusEstimatedMinutes READ focusEstimatedMinutes NOTIFY focusTaskChanged)
+    Q_PROPERTY(QString focusEstimatedText READ focusEstimatedText NOTIFY focusTaskChanged)
     Q_PROPERTY(QString focusReasonText READ focusReasonText NOTIFY focusTaskChanged)
     Q_PROPERTY(bool focusOverdue READ focusOverdue NOTIFY focusTaskChanged)
     Q_PROPERTY(bool focusCanStart READ focusCanStart NOTIFY focusTaskChanged)
@@ -54,6 +55,7 @@ public:
     [[nodiscard]] virtual QString focusPriorityText() const = 0;
     [[nodiscard]] virtual QString focusDeadlineText() const = 0;
     [[nodiscard]] virtual int focusEstimatedMinutes() const noexcept = 0;
+    [[nodiscard]] virtual QString focusEstimatedText() const = 0;
     [[nodiscard]] virtual QString focusReasonText() const = 0;
     [[nodiscard]] virtual bool focusOverdue() const noexcept = 0;
     [[nodiscard]] virtual bool focusCanStart() const noexcept = 0;

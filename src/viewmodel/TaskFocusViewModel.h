@@ -21,6 +21,7 @@ public:
     [[nodiscard]] QString focusPriorityText() const override;
     [[nodiscard]] QString focusDeadlineText() const override;
     [[nodiscard]] int focusEstimatedMinutes() const noexcept override;
+    [[nodiscard]] QString focusEstimatedText() const override;
     [[nodiscard]] QString focusReasonText() const override;
     [[nodiscard]] bool focusOverdue() const noexcept override;
     [[nodiscard]] bool focusCanStart() const noexcept override;

@@ -30,6 +30,14 @@ QString TaskFocusViewModel::focusStatusText() const { const auto *task = focusTa
 QString TaskFocusViewModel::focusPriorityText() const { const auto *task = focusTask(); return task ? taskPriorityText(task->priority()) : QString{}; }
 QString TaskFocusViewModel::focusDeadlineText() const { const auto *task = focusTask(); return task ? taskDeadlineText(*task, {}) : QString{}; }
 int TaskFocusViewModel::focusEstimatedMinutes() const noexcept { const auto *task = focusTask(); return task && task->estimatedMinutes() ? *task->estimatedMinutes() : 0; }
+QString TaskFocusViewModel::focusEstimatedText() const
+{
+    const auto *task = focusTask();
+    if (task == nullptr) return {};
+    return task->estimatedMinutes()
+        ? QStringLiteral("预计 %1 分钟").arg(*task->estimatedMinutes())
+        : QStringLiteral("未设置预计用时");
+}
 QString TaskFocusViewModel::focusReasonText() const { return m_planSource.projection().orderReasonTexts.value(m_focusTaskId); }
 bool TaskFocusViewModel::focusOverdue() const noexcept { return m_planSource.projection().overdueStates.value(m_focusTaskId, false); }
 bool TaskFocusViewModel::focusCanStart() const noexcept { return m_planSource.projection().availabilityFor(m_focusTaskId).canStart; }

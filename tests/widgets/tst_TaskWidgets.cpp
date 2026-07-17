@@ -165,6 +165,7 @@ public:
     QString focusPriorityText() const override { return QStringLiteral("高"); }
     QString focusDeadlineText() const override { return {}; }
     int focusEstimatedMinutes() const noexcept override { return 30; }
+    QString focusEstimatedText() const override { return QStringLiteral("预计 30 分钟"); }
     QString focusReasonText() const override { return QStringLiteral("高优先"); }
     bool focusOverdue() const noexcept override { return overdue; }
     bool focusCanStart() const noexcept override { return true; }

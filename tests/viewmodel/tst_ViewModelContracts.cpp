@@ -238,6 +238,7 @@ void ViewModelContractsTest::concreteMetaObjectsExposeInheritedQmlApi()
 
     const QMetaObject &focusMeta = viewmodel::TaskFocusViewModel::staticMetaObject;
     QVERIFY(focusMeta.indexOfProperty("focusTaskId") >= 0);
+    QVERIFY(focusMeta.indexOfProperty("focusEstimatedText") >= 0);
     QVERIFY(focusMeta.indexOfEnumerator("FocusState") >= 0);
     const QMetaObject &detailsMeta = viewmodel::TaskDetailsViewModel::staticMetaObject;
     QVERIFY(detailsMeta.indexOfProperty("selectedTaskId") >= 0);
