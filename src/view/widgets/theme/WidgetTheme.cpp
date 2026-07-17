@@ -85,6 +85,24 @@ QColor WidgetTheme::statisticsCategoryColor(
     return textMuted;
 }
 
+QColor WidgetTheme::focusCategoryColor(
+    const viewmodel::FocusContract::CategoryColor color) const
+{
+    using Color = viewmodel::FocusContract::CategoryColor;
+    switch (color) {
+    case Color::Blue: return QColor{"#2563eb"};
+    case Color::Teal: return QColor{"#0f766e"};
+    case Color::Green: return QColor{"#15803d"};
+    case Color::Amber: return QColor{"#b45309"};
+    case Color::Orange: return QColor{"#c2410c"};
+    case Color::Rose: return QColor{"#be123c"};
+    case Color::Violet: return QColor{"#7c3aed"};
+    case Color::Slate: return QColor{"#475569"};
+    case Color::Unclassified: return QColor{"#94a3b8"};
+    }
+    return textMuted;
+}
+
 QPalette WidgetTheme::palette() const
 {
     // Palette 与 QSS 共用同一主题对象，避免自绘图元和标准控件出现颜色分裂。
@@ -113,7 +131,8 @@ QString WidgetTheme::styleSheet() const
 {
     return QStringLiteral(R"(
         QMainWindow, QWidget#pageSurface, QScrollArea#statisticsPage,
-        QWidget#statisticsViewport, QWidget#statisticsContent {
+        QWidget#statisticsViewport, QWidget#statisticsContent,
+        QScrollArea#focusPage, QWidget#focusViewport, QWidget#focusContent {
             background: %1; color: %2;
         }
         QFrame#navigationPanel { background: %3; border-right: 1px solid %4; }
@@ -125,10 +144,12 @@ QString WidgetTheme::styleSheet() const
         QPushButton:hover { border-color: %9; }
         QPushButton:checked { color: %10; border-color: %10; background: %11; font-weight: 600; }
         QPushButton#taskNavigationButton, QPushButton#graphNavigationButton,
+        QPushButton#focusNavigationButton,
         QPushButton#statisticsNavigationButton, QPushButton#settingsNavigationButton {
             text-align: left; padding: 10px 14px; border: none; background: transparent;
         }
         QPushButton#taskNavigationButton:checked, QPushButton#graphNavigationButton:checked,
+        QPushButton#focusNavigationButton:checked,
         QPushButton#statisticsNavigationButton:checked, QPushButton#settingsNavigationButton:checked {
             color: %10; background: %11;
         }
@@ -250,6 +271,30 @@ QString WidgetTheme::styleSheet() const
         QLabel#focusTaskDescription { color: %12; font-size: 13px; }
         QLabel#focusTaskMeta { color: %12; font-size: 12px; }
         QLabel#focusOverdueReminder { color: %16; font-size: 12px; font-weight: 600; }
+        QFrame#focusSessionCard, QFrame#focusHistoryRow {
+            background: %5; border: 1px solid %4; border-radius: 11px;
+        }
+        QLabel#focusSessionState { color: %10; font-size: 13px; font-weight: 700; }
+        QLabel#focusSessionTaskTitle { color: %2; font-size: 21px; font-weight: 700; }
+        QLabel#focusElapsedText { color: %2; font-size: 46px; font-weight: 700; padding: 14px; }
+        QLabel#focusCategoryText, QLabel#focusEstimateText, QLabel#focusStartedAtText,
+        QLabel#focusHistoryCount, QLabel#focusHistoryMetadata { color: %12; }
+        QLabel#focusEmptyState, QLabel#focusHistoryEmptyState {
+            color: %12; background: %6; border: 1px dashed %7;
+            border-radius: 9px; padding: 20px;
+        }
+        QLabel#focusStorageWarning {
+            color: %16; background: %6; border: 1px solid %7;
+            border-radius: 8px; padding: 9px 12px; font-weight: 600;
+        }
+        QLabel#focusHistoryTaskTitle, QLabel#focusHistoryDuration {
+            color: %2; font-weight: 700;
+        }
+        QPushButton#startFocusButton, QPushButton#resumeFocusButton,
+        QPushButton#completeFocusButton {
+            color: white; background: %10; border-color: %10; font-weight: 700;
+        }
+        QPushButton#abandonFocusButton { color: %16; }
         QFrame#todayStatisticsCard, QFrame#weekStatisticsCard,
         QFrame#onTimeStatisticsCard, QFrame#overdueStatisticsCard,
         QFrame#trendStatisticsCard, QFrame#categoryStatisticsCard,

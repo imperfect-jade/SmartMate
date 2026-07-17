@@ -1,6 +1,6 @@
 # SmartMate 专注功能设计
 
-> **实现状态**：前三阶段已经完成。当前代码包含专注领域事实、Schema v5、`IFocusSessionRepository`、SQLite 原子读写、`FocusService`、5 秒检查点、启动/退出恢复、任务完成和取消保护，以及 `FocusContract`、`FocusViewModel` 和最近记录投影；专注页面、正式组合根注入、导航和专注统计尚未实现，因此正式应用暂时没有可见的专注入口。
+> **实现状态**：首版自由专注纵向链路已经完成。当前代码包含专注领域事实、Schema v5、`IFocusSessionRepository`、SQLite 原子读写、`FocusService`、5 秒检查点、启动/退出恢复、任务完成和取消保护、`FocusContract`、`FocusViewModel`、纯 Widgets `FocusPage`、正式组合根注入、导航和最近记录投影；专注统计尚未实现。
 
 ## 1. 产品范围
 
@@ -42,7 +42,7 @@
 持久化依赖方向固定为：
 
 ```text
-未来 FocusService → IFocusSessionRepository ← SqliteTaskRepository
+FocusService → IFocusSessionRepository ← SqliteTaskRepository
 ```
 
 Repository 只暴露普通领域类型和结构化写入结果，不暴露 `QSqlQuery`、连接或 SQL 错误码。写入结果区分成功、任务不是进行中、已有活动会话、会话不存在和期望状态冲突；真正的数据库故障继续抛出 `RepositoryException`。
@@ -92,14 +92,15 @@ v1、v2、v3 和 v4 数据库统一原子迁移到 v5，不回填专注记录，
 - `FocusViewModel` 每秒通过 `snapshot(0)`刷新 Running 展示，完整刷新读取最近记录；它只格式化本地时间与文案，不复制会话状态机或累计规则；
 - 可选注入 `FocusService` 的 `AppViewModel` 拥有稳定专注子对象，并在专注变化后刷新共享任务计划源；正式组合根将在下一阶段切换到该构造。
 
-### 阶段 4：专注页面与正式接入（待实现）
+### 阶段 4：专注页面与正式接入（已完成）
 
 - 新增纯 Qt Widgets 专注页面，显示当前任务、正计时、暂停/继续/完成/放弃命令和最近记录；
-- 通过组合根注入并加入正式导航，Widget 只调用 Contract 强类型命令。
+- 通过组合根注入并加入正式导航，Widget 只调用 Contract 强类型命令；
+- 主窗口顺序固定为任务、依赖图、专注、统计、设置；无进行中任务时可返回任务页，放弃专注必须确认；
+- 任务变化通过 `AppViewModel` 协调刷新专注投影，专注变化通过共享计划源刷新任务资格，子 ViewModel 之间不直接调用。
 
-### 阶段 5：纵向集成与专注统计（待实现）
+### 阶段 5：专注统计（待实现）
 
-- 验证任务、专注会话、异常恢复和页面通知的完整数据流；
 - 在可靠会话事实稳定后，再把今日/本周专注时长、专注趋势及预计/实际对比接入 `StatisticsService`。
 
 任何后续阶段都必须保持 `FocusPage → Focus Contract → FocusViewModel → FocusService → IFocusSessionRepository`，不得让 View 或 ViewModel 直接查询 SQLite 或自行计算业务时长。

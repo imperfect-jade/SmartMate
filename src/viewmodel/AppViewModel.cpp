@@ -1,6 +1,7 @@
 #include "AppViewModel.h"
 
 #include "services/FocusService.h"
+#include "services/TaskService.h"
 
 namespace smartmate::viewmodel {
 
@@ -109,6 +110,10 @@ AppViewModel::AppViewModel(model::TaskService &taskService,
 {
     connect(&focusService, &model::FocusService::focusChanged,
             &m_taskPlanSource, &TaskPlanProjectionSource::refresh);
+    // 任务开始后由组合级协调触发专注投影刷新；FocusViewModel 仍只读取 FocusService，
+    // 不直接调用任务 ViewModel 或 TaskService。
+    connect(&taskService, &model::TaskService::tasksChanged,
+            m_focus.get(), &FocusViewModel::reload);
 }
 
 AppViewModel::AppViewModel(model::TaskService &taskService,
@@ -155,6 +160,8 @@ AppViewModel::AppViewModel(model::TaskService &taskService,
 {
     connect(&focusService, &model::FocusService::focusChanged,
             &m_taskPlanSource, &TaskPlanProjectionSource::refresh);
+    connect(&taskService, &model::TaskService::tasksChanged,
+            m_focus.get(), &FocusViewModel::reload);
 }
 
 TaskListViewModel *AppViewModel::taskList() noexcept

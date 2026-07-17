@@ -6,6 +6,7 @@
 #include "services/AppearanceSettingsService.h"
 #include "services/DesktopPetSettingsService.h"
 #include "services/StatisticsService.h"
+#include "services/FocusService.h"
 #include "services/TaskCategoryService.h"
 #include "services/TaskService.h"
 #include "view/widgets/MainWindow.h"
@@ -177,8 +178,10 @@ void WidgetsDesktopPetFlowTest::popupRendersEveryFocusState()
 void WidgetsDesktopPetFlowTest::mainWindowStateSelectsExactlyOnePetView()
 {
     model::persistence::SqliteTaskRepository repository{QStringLiteral(":memory:")};
+    model::FocusService focusService{repository, repository, repository, repository};
+    QVERIFY(focusService.initialize().ok());
     model::TaskService taskService{repository, repository, repository,
-                                   repository, repository, repository};
+                                   repository, repository, repository, &repository};
     model::TaskCategoryService categoryService{repository};
     model::StatisticsService statisticsService{repository, repository, repository};
     tests::FakeAppearanceSettingsRepository appearanceRepository;
@@ -188,12 +191,13 @@ void WidgetsDesktopPetFlowTest::mainWindowStateSelectsExactlyOnePetView()
     model::DesktopPetSettingsService petService{petRepository};
     viewmodel::DesktopPetSettingsViewModel petSettings{petService};
     viewmodel::AppViewModel app{taskService, categoryService, statisticsService,
-                                appearanceService};
+                                focusService, appearanceService};
     view::widgets::MainWindow window{{*app.appearanceSettings(), petSettings,
                                       *app.taskList(), *app.taskFocus(),
                                       *app.taskDetails(), *app.taskEditor(),
                                       *app.taskCategories(), *app.taskDependencies(),
-                                      *app.taskGraph(), *app.statistics()}};
+                                      *app.taskGraph(), *app.focus(),
+                                      *app.statistics()}};
     window.showNormal();
     QTRY_VERIFY(topLevelByName(QStringLiteral("attachedDesktopPetWindow"))
                     ->isVisible());

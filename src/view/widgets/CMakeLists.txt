@@ -2,6 +2,8 @@ add_library(smartmate_widgets STATIC
     MainWindowDependencies.h
     MainWindow.h
     MainWindow.cpp
+    focus/FocusPage.h
+    focus/FocusPage.cpp
     statistics/StatisticsPage.h
     statistics/StatisticsPage.cpp
     binding/WidgetBinding.h

@@ -3,6 +3,7 @@
 #include "view/widgets/settings/SettingsPage.h"
 #include "view/widgets/task/TaskPage.h"
 #include "view/widgets/graph/DependencyGraphPage.h"
+#include "view/widgets/focus/FocusPage.h"
 #include "view/widgets/statistics/StatisticsPage.h"
 #include "view/widgets/pet/AttachedDesktopPetWindow.h"
 #include "view/widgets/pet/FloatingDesktopPetWindow.h"
@@ -91,6 +92,7 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
                                           dependencies.taskGraph,
                                           dependencies.taskDetails,
                                           dependencies.taskDependencies}},
+                 new FocusPage{dependencies.focus},
                  new StatisticsPage{dependencies.statistics},
                  parent)
 {
@@ -128,6 +130,9 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
     auto *taskPage = qobject_cast<TaskPage *>(m_pages->widget(0));
     connect(taskPage, &TaskPage::showDependencyGraphRequested, m_pages,
             [this] { m_pages->setCurrentIndex(1); });
+    auto *focusPage = qobject_cast<FocusPage *>(m_pages->widget(2));
+    connect(focusPage, &FocusPage::showTasksRequested, m_pages,
+            [this] { m_pages->setCurrentIndex(0); });
     // 各窄 Contract 的一次性展示通知统一汇聚到窗口状态栏；
     // 通知只负责反馈，不承担 ViewModel 之间的数据同步。
     connect(&dependencies.taskList, &viewmodel::TaskListContract::notificationRaised,
@@ -150,6 +155,9 @@ MainWindow::MainWindow(MainWindowDependencies dependencies, QWidget *parent)
     connect(&dependencies.statistics,
             &viewmodel::StatisticsContract::notificationRaised,
             this, &MainWindow::showNotification);
+    connect(&dependencies.focus,
+            &viewmodel::FocusContract::notificationRaised,
+            this, &MainWindow::showNotification);
     syncDesktopPetVisibility();
 }
 
@@ -159,6 +167,7 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
                  nullptr,
                  migrationPlaceholder(tr("任务"), tr("任务页面未注入测试依赖。")),
                  migrationPlaceholder(tr("依赖图"), tr("依赖图页面未注入测试依赖。")),
+                 migrationPlaceholder(tr("专注"), tr("专注页面未注入测试依赖。")),
                  migrationPlaceholder(tr("统计"), tr("统计页面未注入测试依赖。")),
                  parent)
 {
@@ -167,7 +176,7 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
 MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
                        viewmodel::DesktopPetSettingsContract *desktopPetSettings,
                        QWidget *taskPage, QWidget *graphPage,
-                       QWidget *statisticsPage, QWidget *parent)
+                       QWidget *focusPage, QWidget *statisticsPage, QWidget *parent)
     : QMainWindow(parent)
     , m_appearanceSettings(appearanceSettings)
     , m_desktopPetSettings(desktopPetSettings)
@@ -177,6 +186,7 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
     , m_brand(new QLabel(QStringLiteral("SmartMate"), m_navigation))
     , m_taskNavigation(nullptr)
     , m_graphNavigation(nullptr)
+    , m_focusNavigation(nullptr)
     , m_statisticsNavigation(nullptr)
     , m_settingsNavigation(nullptr)
 {
@@ -216,12 +226,16 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
     m_graphNavigation = navigationButton(tr("依赖图"), QStringLiteral("graphNavigationButton"),
                                          *navigationGroup, *navigationLayout, 1);
     m_graphNavigation->setAccessibleName(tr("依赖图"));
+    m_focusNavigation = navigationButton(
+        tr("专注"), QStringLiteral("focusNavigationButton"),
+        *navigationGroup, *navigationLayout, 2);
+    m_focusNavigation->setAccessibleName(tr("专注"));
     m_statisticsNavigation = navigationButton(
         tr("统计"), QStringLiteral("statisticsNavigationButton"),
-        *navigationGroup, *navigationLayout, 2);
+        *navigationGroup, *navigationLayout, 3);
     m_statisticsNavigation->setAccessibleName(tr("统计"));
     m_settingsNavigation = navigationButton(tr("设置"), QStringLiteral("settingsNavigationButton"),
-                                            *navigationGroup, *navigationLayout, 3);
+                                            *navigationGroup, *navigationLayout, 4);
     m_settingsNavigation->setAccessibleName(tr("设置"));
     navigationLayout->addStretch();
 
@@ -230,6 +244,7 @@ MainWindow::MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings
 
     m_pages->addWidget(taskPage);
     m_pages->addWidget(graphPage);
+    m_pages->addWidget(focusPage);
     m_pages->addWidget(statisticsPage);
     if (desktopPetSettings != nullptr) {
         m_pages->addWidget(
@@ -315,10 +330,12 @@ void MainWindow::applyNavigationMode()
     m_brand->setText(compact ? QStringLiteral("S") : QStringLiteral("SmartMate"));
     m_taskNavigation->setText(compact ? QStringLiteral("✓") : tr("任务"));
     m_graphNavigation->setText(compact ? QStringLiteral("↗") : tr("依赖图"));
+    m_focusNavigation->setText(compact ? QStringLiteral("◎") : tr("专注"));
     m_statisticsNavigation->setText(compact ? QStringLiteral("▥") : tr("统计"));
     m_settingsNavigation->setText(compact ? QStringLiteral("⚙") : tr("设置"));
     m_taskNavigation->setToolTip(compact ? tr("任务") : QString{});
     m_graphNavigation->setToolTip(compact ? tr("依赖图") : QString{});
+    m_focusNavigation->setToolTip(compact ? tr("专注") : QString{});
     m_statisticsNavigation->setToolTip(compact ? tr("统计") : QString{});
     m_settingsNavigation->setToolTip(compact ? tr("设置") : QString{});
 }

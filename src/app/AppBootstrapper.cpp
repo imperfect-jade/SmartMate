@@ -116,7 +116,7 @@ AppBootstrapper::AppBootstrapper(QString databasePath)
     // 所有数据源就绪后再创建展示层，保证子 ViewModel 构造时可以安全加载初始投影。
     m_appViewModel = std::make_unique<viewmodel::AppViewModel>(
         *m_taskService, *m_taskCategoryService,
-        *m_statisticsService, *m_appearanceService);
+        *m_statisticsService, *m_focusService, *m_appearanceService);
     m_desktopPetViewModel =
         std::make_unique<viewmodel::DesktopPetSettingsViewModel>(
             *m_desktopPetService);
@@ -136,6 +136,7 @@ view::widgets::MainWindowDependencies AppBootstrapper::widgetDependencies() noex
             *m_appViewModel->taskCategories(),
             *m_appViewModel->taskDependencies(),
             *m_appViewModel->taskGraph(),
+            *m_appViewModel->focus(),
             *m_appViewModel->statistics()};
 }
 

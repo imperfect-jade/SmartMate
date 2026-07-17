@@ -54,7 +54,7 @@ private:
     MainWindow(viewmodel::AppearanceSettingsContract &appearanceSettings,
                viewmodel::DesktopPetSettingsContract *desktopPetSettings,
                QWidget *taskPage, QWidget *graphPage,
-               QWidget *statisticsPage, QWidget *parent);
+               QWidget *focusPage, QWidget *statisticsPage, QWidget *parent);
     void applyAppearance();
     void applyNavigationMode();
     void showNotification(const common::UiNotification &notification);
@@ -75,6 +75,7 @@ private:
     QLabel *m_brand;
     QPushButton *m_taskNavigation;
     QPushButton *m_graphNavigation;
+    QPushButton *m_focusNavigation;
     QPushButton *m_statisticsNavigation;
     QPushButton *m_settingsNavigation;
     std::unique_ptr<pet::AttachedDesktopPetWindow> m_attachedPet;

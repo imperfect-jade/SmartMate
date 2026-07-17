@@ -6,6 +6,7 @@
 #include "services/TaskService.h"
 #include "view/widgets/MainWindow.h"
 #include "view/widgets/statistics/StatisticsPage.h"
+#include "view/widgets/focus/FocusPage.h"
 #include "viewmodel/contracts/StatisticsContract.h"
 
 #include <QLabel>
@@ -112,18 +113,25 @@ void WidgetsStatisticsFlowTest::bootstrapInjectsTheStatisticsPageIntoNavigation(
 
     auto *pages = window.findChild<QStackedWidget *>();
     QVERIFY(pages != nullptr);
-    QCOMPARE(pages->count(), 4);
-    QVERIFY(qobject_cast<view::widgets::StatisticsPage *>(pages->widget(2)) != nullptr);
+    QCOMPARE(pages->count(), 5);
+    QVERIFY(qobject_cast<view::widgets::FocusPage *>(pages->widget(2)) != nullptr);
+    QVERIFY(qobject_cast<view::widgets::StatisticsPage *>(pages->widget(3)) != nullptr);
+
+    auto *focusNavigation = requiredChild<QPushButton>(
+        window, "focusNavigationButton");
+    QCOMPARE(focusNavigation->accessibleName(), QStringLiteral("专注"));
+    QTest::mouseClick(focusNavigation, Qt::LeftButton);
+    QCOMPARE(pages->currentIndex(), 2);
 
     auto *statisticsNavigation = requiredChild<QPushButton>(
         window, "statisticsNavigationButton");
     QCOMPARE(statisticsNavigation->accessibleName(), QStringLiteral("统计"));
     QTest::mouseClick(statisticsNavigation, Qt::LeftButton);
-    QCOMPARE(pages->currentIndex(), 2);
+    QCOMPARE(pages->currentIndex(), 3);
 
     QTest::mouseClick(requiredChild<QPushButton>(window, "settingsNavigationButton"),
                       Qt::LeftButton);
-    QCOMPARE(pages->currentIndex(), 3);
+    QCOMPARE(pages->currentIndex(), 4);
 }
 
 QTEST_MAIN(WidgetsStatisticsFlowTest)

@@ -99,12 +99,14 @@ else()
     endif()
 endif()
 
-# 第三阶段必须建立独立 Focus Contract/ViewModel，且不得把具体实现泄漏给 View。
+# 第四阶段必须建立独立 Focus Contract/ViewModel/Page，且不得把具体实现泄漏给 View。
 set(focus_contract "${ROOT_DIR}/src/viewmodel/contracts/FocusContract.h")
 set(focus_viewmodel "${ROOT_DIR}/src/viewmodel/FocusViewModel.h")
-if(NOT EXISTS "${focus_contract}" OR NOT EXISTS "${focus_viewmodel}")
+set(focus_page "${ROOT_DIR}/src/view/widgets/focus/FocusPage.h")
+if(NOT EXISTS "${focus_contract}" OR NOT EXISTS "${focus_viewmodel}"
+   OR NOT EXISTS "${focus_page}")
     record_violation("${ROOT_DIR}/src/viewmodel"
-        "Focus Contracts and FocusViewModel are required for stage 3")
+        "Focus Contracts, FocusViewModel, and FocusPage are required for stage 4")
 endif()
 
 scan_includes("${ROOT_DIR}/src/common" "Common"
@@ -352,6 +354,11 @@ if(EXISTS "${main_window_dependencies}")
         record_violation("${main_window_dependencies}"
             "MainWindow must receive the statistics page through StatisticsContract")
     endif()
+    if(NOT main_window_dependencies_lower MATCHES "focuscontract"
+       OR NOT main_window_dependencies_lower MATCHES "focus")
+        record_violation("${main_window_dependencies}"
+            "MainWindow must receive the focus page through FocusContract")
+    endif()
 endif()
 
 set(app_bootstrapper_header "${ROOT_DIR}/src/app/AppBootstrapper.h")
@@ -371,9 +378,10 @@ if(EXISTS "${app_bootstrapper_header}" AND EXISTS "${app_bootstrapper_source}")
     if(NOT app_bootstrapper_lower MATCHES "focusservice"
        OR NOT app_bootstrapper_lower MATCHES "m_focusservice"
        OR NOT app_bootstrapper_lower MATCHES "initialize"
+       OR NOT app_bootstrapper_lower MATCHES "focus\(\)"
        OR NOT app_bootstrapper_lower MATCHES "prepareforshutdown")
         record_violation("${app_bootstrapper_source}"
-            "The app composition root must own and initialize FocusService and prepare it for shutdown")
+            "The app composition root must own FocusService, inject FocusContract, and handle lifecycle")
     endif()
 endif()
 

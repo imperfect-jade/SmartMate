@@ -2,6 +2,7 @@
 
 #include "viewmodel/contracts/TaskPresentationTypes.h"
 #include "viewmodel/contracts/StatisticsContract.h"
+#include "viewmodel/contracts/FocusContract.h"
 
 #include <QColor>
 #include <QFont>
@@ -50,6 +51,9 @@ struct WidgetTheme {
     /// 将 Statistics Contract 的稳定颜色枚举解释为 Widgets/Charts 颜色。
     [[nodiscard]] QColor statisticsCategoryColor(
         viewmodel::StatisticsCategoryContract::Color color) const;
+    /// 将 Focus Contract 的稳定类别色解释为 Widgets 颜色。
+    [[nodiscard]] QColor focusCategoryColor(
+        viewmodel::FocusContract::CategoryColor color) const;
 
     [[nodiscard]] static WidgetTheme fromAccentIndex(int accentThemeIndex);
     [[nodiscard]] static WidgetTheme fromPalette(const QPalette &palette);

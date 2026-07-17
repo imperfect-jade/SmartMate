@@ -49,7 +49,7 @@ private:
     // 持有的引用在各自生命周期内始终指向仍然存活的对象。
     /// 任务 SQLite 适配器，同时实现任务、依赖、批量命令和类别 Repository 端口。
     std::unique_ptr<model::persistence::SqliteTaskRepository> m_taskRepository;
-    /// 专注业务入口；当前阶段只负责恢复、检查点和退出，不向 View 注入。
+    /// 专注业务入口；由完整 AppViewModel 构造注入 FocusContract 展示链路。
     std::unique_ptr<model::FocusService> m_focusService;
     /// 任务业务用例入口；通过抽象 Repository 端口访问同一个 SQLite 适配器。
     std::unique_ptr<model::TaskService> m_taskService;

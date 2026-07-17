@@ -336,6 +336,16 @@ add_test(NAME view.widgets_statistics
     COMMAND tst_statistics_widgets -platform offscreen)
 set_tests_properties(view.widgets_statistics PROPERTIES TIMEOUT 20)
 
+qt_add_executable(tst_focus_widgets
+    widgets/tst_FocusWidgets.cpp
+)
+target_link_libraries(tst_focus_widgets
+    PRIVATE smartmate_widgets Qt6::Test
+)
+add_test(NAME view.widgets_focus
+    COMMAND tst_focus_widgets -platform offscreen)
+set_tests_properties(view.widgets_focus PROPERTIES TIMEOUT 20)
+
 qt_add_executable(tst_widgets_appearance_flow
     integration/tst_WidgetsAppearanceFlow.cpp
     fakes/FakeAppearanceSettingsRepository.h
@@ -389,6 +399,20 @@ target_link_libraries(tst_widgets_statistics_flow
 add_test(NAME integration.widgets_statistics
     COMMAND tst_widgets_statistics_flow -platform offscreen)
 set_tests_properties(integration.widgets_statistics PROPERTIES TIMEOUT 30)
+
+qt_add_executable(tst_widgets_focus_flow
+    integration/tst_WidgetsFocusFlow.cpp
+)
+target_link_libraries(tst_widgets_focus_flow
+    PRIVATE
+        smartmate_widgets
+        smartmate_persistence
+        smartmate_viewmodel
+        Qt6::Test
+)
+add_test(NAME integration.widgets_focus
+    COMMAND tst_widgets_focus_flow -platform offscreen)
+set_tests_properties(integration.widgets_focus PROPERTIES TIMEOUT 30)
 
 qt_add_executable(tst_widgets_desktop_pet_flow
     integration/tst_WidgetsDesktopPetFlow.cpp
@@ -467,11 +491,13 @@ set(runtime_tests
     view.widgets_tasks
     view.widgets_graph
     view.widgets_statistics
+    view.widgets_focus
     integration.widgets_appearance
     integration.widgets_tasks
     integration.widgets_category_dependencies
     integration.widgets_graph
     integration.widgets_statistics
+    integration.widgets_focus
     integration.widgets_desktop_pet
     integration.task_creation_flow
     integration.focus_app_lifecycle
