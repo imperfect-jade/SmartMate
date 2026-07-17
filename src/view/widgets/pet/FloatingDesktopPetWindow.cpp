@@ -9,6 +9,7 @@
 
 #include <QApplication>
 #include <QGuiApplication>
+#include <QHideEvent>
 #include <QMouseEvent>
 #include <QScreen>
 #include <QVBoxLayout>
@@ -38,7 +39,10 @@ FloatingDesktopPetWindow::FloatingDesktopPetWindow(
     layout->addWidget(m_sprite);
     setFixedSize(m_sprite->size());
     connect(m_popup, &DesktopPetTaskPopup::openMainWindowRequested,
-            this, &FloatingDesktopPetWindow::openMainWindowRequested);
+            this, [this] {
+                dismissTaskPopup();
+                emit openMainWindowRequested();
+            });
 }
 
 void FloatingDesktopPetWindow::restorePosition(QScreen *fallbackScreen)
@@ -75,6 +79,13 @@ bool FloatingDesktopPetWindow::assetReady() const noexcept
     return m_sprite->assetReady();
 }
 
+void FloatingDesktopPetWindow::hideEvent(QHideEvent *event)
+{
+    // 气泡是独立的顶层 Qt::Tool 窗口，不能依赖悬浮窗的原生隐藏行为同步关闭。
+    dismissTaskPopup();
+    QWidget::hideEvent(event);
+}
+
 void FloatingDesktopPetWindow::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
@@ -95,7 +106,7 @@ void FloatingDesktopPetWindow::mouseMoveEvent(QMouseEvent *event)
         if (!m_dragging
             && delta.manhattanLength() >= QApplication::startDragDistance()) {
             m_dragging = true;
-            m_popup->hide();
+            dismissTaskPopup();
         }
         if (m_dragging) {
             move(m_pressWindowPosition + delta);
@@ -151,6 +162,11 @@ void FloatingDesktopPetWindow::persistPosition()
     const QPointF ratios = ratiosFromPosition(screen->availableGeometry(),
                                                size(), clamped);
     m_settings.saveFloatingPlacement(screen->name(), ratios.x(), ratios.y());
+}
+
+void FloatingDesktopPetWindow::dismissTaskPopup()
+{
+    m_popup->hide();
 }
 
 } // namespace smartmate::view::widgets::pet

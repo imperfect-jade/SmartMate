@@ -4,6 +4,7 @@
 #include <QWidget>
 
 class QMouseEvent;
+class QHideEvent;
 class QScreen;
 
 namespace smartmate::viewmodel {
@@ -35,11 +36,13 @@ signals:
     void openMainWindowRequested();
 
 protected:
+    void hideEvent(QHideEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
+    void dismissTaskPopup();
     QScreen *savedOrFallbackScreen(QScreen *fallbackScreen) const;
     void persistPosition();
 

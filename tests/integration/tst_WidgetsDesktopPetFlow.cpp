@@ -73,6 +73,7 @@ private slots:
     void popupStartsAndCompletesStableFocusedTask();
     void popupRendersEveryFocusState();
     void mainWindowStateSelectsExactlyOnePetView();
+    void floatingPetDismissesPopupWhenSessionEnds();
 };
 
 void WidgetsDesktopPetFlowTest::popupStartsAndCompletesStableFocusedTask()
@@ -224,6 +225,63 @@ void WidgetsDesktopPetFlowTest::mainWindowStateSelectsExactlyOnePetView()
                      ->isVisible());
     QVERIFY(!topLevelByName(QStringLiteral("floatingDesktopPetWindow"))
                  ->isVisible());
+}
+
+void WidgetsDesktopPetFlowTest::floatingPetDismissesPopupWhenSessionEnds()
+{
+    model::persistence::SqliteTaskRepository repository{QStringLiteral(":memory:")};
+    model::FocusService focusService{repository, repository, repository, repository};
+    QVERIFY(focusService.initialize().ok());
+    model::TaskService taskService{repository, repository, repository,
+                                   repository, repository, repository, &repository};
+    model::TaskCategoryService categoryService{repository};
+    model::StatisticsService statisticsService{repository, repository, repository};
+    tests::FakeAppearanceSettingsRepository appearanceRepository;
+    model::AppearanceSettingsService appearanceService{appearanceRepository};
+    tests::FakeDesktopPetSettingsRepository petRepository;
+    petRepository.settings.enabled = true;
+    model::DesktopPetSettingsService petService{petRepository};
+    viewmodel::DesktopPetSettingsViewModel petSettings{petService};
+    viewmodel::AppViewModel app{taskService, categoryService, statisticsService,
+                                focusService, appearanceService};
+    view::widgets::MainWindow window{{*app.appearanceSettings(), petSettings,
+                                      *app.taskList(), *app.taskFocus(),
+                                      *app.taskDetails(), *app.taskEditor(),
+                                      *app.taskCategories(), *app.taskDependencies(),
+                                      *app.taskGraph(), *app.focus(),
+                                      *app.statistics()}};
+    window.showNormal();
+    window.setWindowState(Qt::WindowMinimized);
+
+    QWidget *floating = topLevelByName(
+        QStringLiteral("floatingDesktopPetWindow"));
+    QWidget *popup = topLevelByName(QStringLiteral("desktopPetTaskPopup"));
+    QVERIFY(floating != nullptr);
+    QVERIFY(popup != nullptr);
+    QTRY_VERIFY(floating->isVisible());
+
+    QTest::mouseClick(floating, Qt::LeftButton, Qt::NoModifier,
+                      floating->rect().center());
+    QTRY_VERIFY(popup->isVisible());
+
+    // 所有结束悬浮桌宠会话的路径都必须同步关闭独立的顶层气泡。
+    floating->hide();
+    QTRY_VERIFY(!popup->isVisible());
+
+    floating->show();
+    QTRY_VERIFY(floating->isVisible());
+    QTest::mouseClick(floating, Qt::LeftButton, Qt::NoModifier,
+                      floating->rect().center());
+    QTRY_VERIFY(popup->isVisible());
+    auto *openButton = popup->findChild<QPushButton *>(
+        QStringLiteral("desktopPetOpenButton"));
+    QVERIFY(openButton != nullptr);
+
+    QTest::mouseClick(openButton, Qt::LeftButton);
+    QTRY_VERIFY(window.isVisible());
+    QTRY_VERIFY(!window.isMinimized());
+    QTRY_VERIFY(!popup->isVisible());
+    QTRY_VERIFY(!floating->isVisible());
 }
 
 QTEST_MAIN(WidgetsDesktopPetFlowTest)

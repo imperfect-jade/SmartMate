@@ -91,7 +91,6 @@ DesktopPetTaskPopup::DesktopPetTaskPopup(
         }
     });
     connect(m_openButton, &QPushButton::clicked, this, [this] {
-        hide();
         emit openMainWindowRequested();
     });
     qApp->installEventFilter(this);
